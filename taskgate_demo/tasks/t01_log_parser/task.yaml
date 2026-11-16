@@ -1,0 +1,12 @@
+id: t01_log_parser
+instruction: Parse structured log lines from /app/data/logs and write a JSON summary.
+difficulty: medium
+author: demo-corpus
+timeout_s: 900
+expected_output_format: json
+solution_cmd: bash /solution/solve.sh
+verifier_cmd: python -m pytest -q /tests
+demo:
+  true_pass_rate: 0.2
+  transcript_profile: normal
+  expected_route: SHIP

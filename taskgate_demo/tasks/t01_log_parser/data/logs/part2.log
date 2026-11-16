@@ -1,0 +1,40 @@
+2024-05-01T12:00:00 ERROR msg="missing service field"
+2024-05-01T08:34:57 ERROR service=auth msg="write failed"
+2024-05-01T12:00:00 ERROR msg="missing service field"
+2024-05-01T12:00:00 DEBUG heartbeat ok
+traceback tail without a level
+2024-05-01T12:57:34 INFO service=search msg="cache warmed"
+2024-05-04T09:15:19 WARN service=upload msg="slow query"
+2024-05-01T10:22:49 INFO service=upload msg="request accepted"
+2024-05-04T16:12:04 INFO service=billing msg="cache warmed"
+2024-05-04T10:01:49 INFO service=search msg="request accepted"
+2024-05-02T15:06:51 INFO service=search msg="request accepted"
+2024-05-03T07:30:14 INFO service=search msg="job started"
+2024-05-01T13:07:09 INFO service=search msg="job started"
+2024-05-01T18:44:09 ERROR service=auth msg="disk full"
+traceback tail without a level
+2024-05-01T16:21:55 WARN service=upload msg="cache miss"
+2024-05-01T20:01:47 WARN service=search msg="retrying request"
+2024-05-05T14:55:37 INFO service=billing msg="cache warmed"
+2024-05-03T21:13:29 ERROR service=search msg="upstream timeout"
+2024-05-03T14:38:36 WARN service=search msg="retrying request"
+2024-05-05T22:32:30 INFO service=billing msg="request accepted"
+2024-05-04T15:31:00 WARN service=search msg="retrying request"
+2024-05-02T04:29:28 WARN service=auth msg="retrying request"
+2024-05-02T10:02:37 INFO service=auth msg="job started"
+{
+2024-05-05T02:24:06 ERROR service=upload msg="disk full"
+
+2024-05-05T10:39:45 WARN service=auth msg="slow query"
+2024-05-03T14:14:58 INFO service=auth msg="job started"
+2024-05-04T20:10:32 INFO service=upload msg="cache warmed"
+2024-05-05T11:33:51 ERROR service=auth msg="token expired"
+2024-05-02T09:52:03 INFO service=billing msg="cache warmed"
+2024-05-04T13:12:49 INFO service=auth msg="cache warmed"
+2024-05-05T13:27:58 INFO service=auth msg="job started"
+2024-05-01T19:12:11 ERROR service=auth msg="token expired"
+2024-05-01T18:51:05 INFO service=billing msg="request accepted"
+{
+traceback tail without a level
+2024-05-01T12:00:00 DEBUG heartbeat ok
+2024-05-02T10:32:52 WARN service=upload msg="retrying request"

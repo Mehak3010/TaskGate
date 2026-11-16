@@ -1,0 +1,54 @@
+{
+  "generated_by": "taskgate demo",
+  "note": "Ground truth for the demo corpus only. The mock agent draws its pass/fail decisions from true_pass_rate; routes are asserted in tests/test_integration_demo.py.",
+  "tasks": [
+    {
+      "task_id": "t01_log_parser",
+      "planted_issue": "healthy control: a well-formed, mid-difficulty task",
+      "true_pass_rate": "0.2",
+      "expected_route": "SHIP"
+    },
+    {
+      "task_id": "t02_csv_dedupe",
+      "planted_issue": "healthy control: a well-formed, mid-difficulty task",
+      "true_pass_rate": "0.15",
+      "expected_route": "SHIP"
+    },
+    {
+      "task_id": "t03_trivial_rename",
+      "planted_issue": "degenerately easy: the model solves it almost every time",
+      "true_pass_rate": "0.95",
+      "expected_route": "DROP"
+    },
+    {
+      "task_id": "t04_ambiguous_spec",
+      "planted_issue": "underspecified: the instruction never says where the output goes",
+      "true_pass_rate": "0.0",
+      "expected_route": "REWRITE"
+    },
+    {
+      "task_id": "t05_leaky_tests",
+      "planted_issue": "the hidden verifier is COPYed into the agent's image (S001)",
+      "true_pass_rate": null,
+      "expected_route": "BLOCKED"
+    },
+    {
+      "task_id": "t06_flaky_timing",
+      "planted_issue": "sleep-based sync, unseeded RNG and wall-clock reads in the verifier (S007 / D001)",
+      "true_pass_rate": null,
+      "expected_route": "BLOCKED"
+    },
+    {
+      "task_id": "t07_network_dep",
+      "planted_issue": "the verifier fetches an expected value over the network at run time (S006 / D003)",
+      "true_pass_rate": null,
+      "expected_route": "BLOCKED"
+    },
+    {
+      "task_id": "t08_borderline",
+      "planted_issue": "borderline: a genuinely hard task whose true solve rate sits just above the window, so the 90% interval still straddles the boundary",
+      "true_pass_rate": "0.35",
+      "expected_route": "NEEDS-MORE-RUNS"
+    }
+  ]
+}
