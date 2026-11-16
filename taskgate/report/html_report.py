@@ -43,7 +43,7 @@ def _x(rate: float, left: float, width: float) -> float:
 def solve_rate_chart(tasks: list[Any], ship_min: float, ship_max: float) -> str:
     """One dot per task with a 90% CI whisker against the shaded target window."""
     rows = len(tasks)
-    left, right, top, row_h = 96.0, 40.0, 34.0, 26.0
+    left, right, top, row_h = 160.0, 40.0, 34.0, 26.0
     width_total, plot_w = 900.0, 900.0 - 96.0 - 40.0
     height = top + row_h * max(rows, 1) + 54.0
 
