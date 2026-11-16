@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TaskGate report — {{ report.config.model }}</title>
+<style>
+  :root {
+    --fg: #1f2328; --muted: #57606a; --line: #d0d7de; --bg: #ffffff; --soft: #f6f8fa;
+    --ship: #1a7f37; --rewrite: #bf8700; --drop: #cf222e; --more: #0969da; --blocked: #57606a;
+    --auditonly: #8250df;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0 0 64px; background: var(--bg); color: var(--fg);
+         font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+  .banner { background: #fff8c5; border-bottom: 2px solid #bf8700; color: #4d2d00;
+            padding: 12px 20px; font-weight: 700; letter-spacing: .04em; text-align: center; }
+  .banner-error { background: #ffd7d5; border-bottom-color: #cf222e; color: #82071e; }
+  header { padding: 28px 0 8px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 32px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 22px;
+          margin: 16px 0 4px; padding: 14px 16px; background: var(--soft); border: 1px solid var(--line); border-radius: 8px; }
+  .meta div { font-size: 13px; }
+  .meta b { display: block; color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 14px; }
+  .tile { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .tile .n { font-size: 26px; font-weight: 700; }
+  .tile .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .tile.ship .n { color: var(--ship); }
+  .tile.rewrite .n { color: var(--rewrite); }
+  .tile.drop .n { color: var(--drop); }
+  .tile.more .n { color: var(--more); }
+  .tile.auditonly .n { color: var(--auditonly); }
+  .tile.blocked .n { color: var(--blocked); }
+  .chart-box { border: 1px solid var(--line); border-radius: 8px; padding: 10px 6px; overflow-x: auto; }
+  svg.chart { width: 100%; height: auto; display: block; }
+  .chart-label { font-size: 11px; fill: #1f2328; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .chart-tick, .chart-note, .chart-none { font-size: 10px; fill: var(--muted); }
+  table.tasks { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  table.tasks th, table.tasks td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.tasks th { background: var(--soft); font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+                   color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+  table.tasks th[data-dir="asc"]::after { content: " ↑"; }
+  table.tasks th[data-dir="desc"]::after { content: " ↓"; }
+  tr.data-row { cursor: pointer; }
+  tr.data-row:hover { background: #f6f8fa; }
+  tr.data-row.open { background: #eef4ff; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700;
+          color: #fff; letter-spacing: .03em; }
+  .pill.SHIP { background: var(--ship); }
+  .pill.REWRITE { background: var(--rewrite); }
+  .pill.DROP { background: var(--drop); }
+  .pill.NEEDS-MORE-RUNS { background: var(--more); }
+  .pill.AUDIT-ONLY { background: var(--auditonly); }
+  .pill.BLOCKED { background: var(--blocked); }
+  .detail-row { display: none; }
+  .detail-row.show { display: table-row; }
+  .detail-row > td { background: #fbfcfd; padding: 0 9px; }
+  .detail { padding: 10px 4px 16px; }
+  .detail h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  ul.findings { margin: 0; padding-left: 18px; }
+  ul.findings li { margin-bottom: 4px; }
+  .sev { font-weight: 700; font-size: 11px; padding: 0 5px; border-radius: 4px; }
+  .sev.BLOCKER { background: #ffebe9; color: #cf222e; }
+  .sev.WARN { background: #fff8c5; color: #7d4e00; }
+  .sev.INFO { background: #ddf4ff; color: #0969da; }
+  .sim { font-size: 10px; color: #7d4e00; background: #fff8c5; border-radius: 4px; padding: 0 4px; }
+  .diag { border-left: 3px solid var(--more); background: #f6f8fa; padding: 8px 12px; border-radius: 0 6px 6px 0; }
+  .dyn { font-size: 13px; }
+  .dyn ul { margin: 0; padding-left: 18px; }
+  table.rollouts { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+  table.rollouts th, table.rollouts td { border-bottom: 1px solid var(--line); padding: 4px 7px; text-align: left; }
+  table.rollouts tr.pass td { background: #eafaef; }
+  table.rollouts tr.fail td { background: #fff5f5; }
+  table.rollouts tr.infra td { background: #f6f8fa; color: var(--muted); }
+  pre { background: #f6f8fa; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+        overflow-x: auto; font-size: 12px; margin: 6px 0; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
+  footer ul { padding-left: 18px; }
+  .controls { margin: 8px 0 0; }
+  button { font: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--line);
+           background: var(--soft); border-radius: 6px; cursor: pointer; }
+  .vars { font-size: 12px; }
+</style>
+</head>
+<body>
+{% if report.simulated %}
+<div class="banner">SIMULATED DATA — these solve rates and transcripts come from the mock agent, not from a model. Do not read them as measurements.</div>
+{% endif %}
+{% if audit_error_warn %}
+<div class="banner banner-error">AUDIT-ERROR on {{ audit_error_count }} of {{ report.tasks|length }} tasks ({{ audit_error_pct }}) — the static audit crashed while reading them. Their findings are incomplete; do not read them as clean.</div>
+{% endif %}
+<div class="wrap">
+
+  <header>
+    <h1>TaskGate report</h1>
+    <div class="sub">
+      Calibration and QA gate for {{ report.summary.n_tasks }} task(s) ·
+      model <span class="mono">{{ report.config.model }}</span> ·
+      {% if report.simulated %}mock mode{% else %}live rollouts{% endif %}
+    </div>
+    <div class="meta">
+      <div><b>Generated</b><span class="mono">{{ report.generated_at }}</span></div>
+      <div><b>Model</b><span class="mono">{{ report.config.model }}</span></div>
+      <div><b>Rollouts / task</b>{{ report.config.rollouts }} (concurrency {{ report.config.concurrency }})</div>
+      <div><b>Seed</b><span class="mono">{{ report.config.seed }}</span></div>
+      <div><b>Ship window</b>{{ "%.0f"|format(report.config.ship_min * 100) }}%–{{ "%.0f"|format(report.config.ship_max * 100) }}%</div>
+      <div><b>Total cost</b>${{ "%.4f"|format(report.summary.total_cost_usd) }}{% if report.config.budget_usd %} / ${{ "%.2f"|format(report.config.budget_usd) }} budget{% endif %}</div>
+      <div><b>Wall time</b>{{ "%.1f"|format(report.summary.wall_time_s) }} s</div>
+      <div><b>Valid rollouts</b>{{ report.summary.total_valid_rollouts }} / {{ report.summary.total_rollouts }}
+        {% if report.summary.infra_error_rate > 0.10 %}<span class="sim">infra errors {{ "%.0f"|format(report.summary.infra_error_rate * 100) }}%</span>{% endif %}
+      </div>
+      <div><b>Docker</b>{% if report.docker_available is none %}not used (demo mode, simulated){% elif report.docker_available %}available{% else %}not reachable (static audit + simulation){% endif %}</div>
+      <div><b>Dynamic audit</b>{% if report.dynamic_audit_ran %}ran{% else %}not run{% endif %}</div>
+      <div><b>Git</b><span class="mono">{{ report.config.git_hash or "n/a" }}</span></div>
+      <div><b>TaskGate</b><span class="mono">{{ report.config.taskgate_version }} · py{{ report.config.python_version }}</span></div>
+      <div><b>Engineer time saved (est.)</b>{{ report.summary.engineer_minutes_saved }} min
+        <span class="sub">≈ {{ "%.1f"|format(report.summary.engineer_minutes_saved / 60) }} h</span></div>
+    </div>
+    <div class="sub" style="margin-top:6px">
+      Estimate assumption: {{ report.config.manual_minutes_per_task }} min manual QA per task and
+      {{ report.config.manual_minutes_per_finding }} min per finding, both configurable. This is a
+      modelled saving, not a measured one.
+    </div>
+  </header>
+
+  <h2>Summary</h2>
+  <div class="tiles">
+    <div class="tile ship"><div class="n">{{ counts.get("SHIP", 0) }}</div><div class="k">SHIP</div></div>
+    <div class="tile rewrite"><div class="n">{{ counts.get("REWRITE", 0) }}</div><div class="k">REWRITE</div></div>
+    <div class="tile more"><div class="n">{{ counts.get("NEEDS-MORE-RUNS", 0) }}</div><div class="k">NEEDS-MORE-RUNS</div></div>
+    <div class="tile auditonly"><div class="n">{{ counts.get("AUDIT-ONLY", 0) }}</div><div class="k">AUDIT-ONLY</div></div>
+    <div class="tile drop"><div class="n">{{ counts.get("DROP", 0) }}</div><div class="k">DROP</div></div>
+    <div class="tile blocked"><div class="n">{{ counts.get("BLOCKED", 0) }}</div><div class="k">BLOCKED</div></div>
+    <div class="tile"><div class="n">{{ report.summary.n_in_window }}</div><div class="k">in target window</div></div>
+    <div class="tile"><div class="n">{{ report.summary.findings_by_severity.get("BLOCKER", 0) }}</div><div class="k">blocker findings</div></div>
+    <div class="tile"><div class="n">{{ report.summary.findings_by_severity.get("WARN", 0) }}</div><div class="k">warnings</div></div>
+  </div>
+
+  <h2>Solve rate with 90% confidence intervals</h2>
+  <div class="chart-box">{{ chart_svg|safe }}</div>
+
+  <h2>Tasks</h2>
+  <div class="controls">
+    <button type="button" id="expand-all">Expand all</button>
+    <button type="button" id="collapse-all">Collapse all</button>
+    <span class="sub">Click a column header to sort; click a row to expand.</span>
+  </div>
+  <table class="tasks">
+    <thead>
+      <tr>
+        <th data-sort>Task</th>
+        <th data-sort>Route</th>
+        <th data-sort>Audit (warn/block)</th>
+        <th data-sort>Solve rate</th>
+        <th data-sort>90% CI</th>
+        <th data-sort>pass@1</th>
+        <th data-sort>Cost</th>
+        <th data-sort>Top finding</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="data-row">
+        <td class="mono" data-sort="{{ row.task_id }}">{{ row.task_id }}</td>
+        <td data-sort="{{ row.route }}"><span class="pill {{ row.route }}">{{ row.route }}</span></td>
+        <td data-sort="{{ row.blockers }}">{% if row.blockers %}✗{{ row.blockers }}{% endif %} {% if row.audit %}{{ row.audit }}{% endif %}</td>
+        <td data-sort="{{ row.rate }}">{{ row.rate }}{% if row.extra_runs %} <span class="sub">(+{{ row.extra_runs }} runs?)</span>{% endif %}</td>
+        <td class="mono" data-sort="{{ row.ci }}">{{ row.ci }}</td>
+        <td data-sort="{{ row.pass_at_1 }}">{{ row.pass_at_1 }}</td>
+        <td class="mono" data-sort="{{ row.cost }}">{{ row.cost }}</td>
+        <td>{{ row.top_finding|truncate(90) }}</td>
+      </tr>
+      <tr class="detail-row">
+        <td colspan="8">
+          <div class="detail">
+            <div class="sub">{{ row.route_reason }}</div>
+            {% if row.error %}<p class="sev BLOCKER">task error: {{ row.error }}</p>{% endif %}
+
+            <h4>Audit findings ({{ row.findings|length }})</h4>
+            {% if row.findings %}
+            <ul class="findings">
+              {% for f in row.findings %}
+              <li>
+                <span class="sev {{ f.severity }}">{{ f.severity }}</span>
+                <span class="mono">{{ f.rule_id }}</span>
+                <span class="mono">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</span>
+                {% if f.simulated %}<span class="sim">SIMULATED</span>{% endif %}
+                — {{ f.message }}
+                {% if f.fix_hint %}<div class="sub">fix: {{ f.fix_hint }}</div>{% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}<div class="sub">No findings.</div>{% endif %}
+
+            <h4>Dynamic audit (container evidence)</h4>
+            <div class="dyn">
+              {% if not row.dynamic_audit.ran %}<div class="sub">Not run: {{ row.dynamic_audit.skipped_reason }}</div>{% endif %}
+              <ul>
+                <li>image build: <b>{{ row.dynamic_audit.build }}</b> · reproducible: <b>{{ row.dynamic_audit.reproducible }}</b></li>
+                <li>reference runs: <b>{{ row.dynamic_audit.rerun_passes }}</b> / <b>{{ row.dynamic_audit.reruns }}</b> passed · durations: {{ row.dynamic_audit.durations }}</li>
+                <li>network-off: <b>{{ row.dynamic_audit.network_off_passed }}</b> · network dependent (D003): <b>{{ row.dynamic_audit.network_dependent }}</b></li>
+                <li>vacuity (D002): <b>{{ row.dynamic_audit.vacuous }}</b></li>
+                <li>mutation probe (D004): <b>{{ row.dynamic_audit.mutations_caught }}</b> / <b>{{ row.dynamic_audit.mutations_probed }}</b> caught</li>
+                <li>mutations tried: {{ row.dynamic_audit.mutations_tried }}</li>
+                <li>mutations skipped: {{ row.dynamic_audit.mutations_skipped }}</li>
+              </ul>
+              {% if row.dynamic_audit.error %}<pre>{{ row.dynamic_audit.error }}</pre>{% endif %}
+            </div>
+
+            {% if row.diagnosis %}
+            <h4>Diagnosis (advisory — a human decides)</h4>
+            <div class="diag">
+              <b>{{ row.diagnosis.likely_cause or "none" }}</b>
+              <span class="sub">source: {{ row.diagnosis.source }}{% if row.diagnosis.stripped %} · model answer was stripped (failed schema validation){% endif %}</span>
+              {% if row.diagnosis.evidence %}
+              <ul>{% for e in row.diagnosis.evidence %}<li>{{ e }}</li>{% endfor %}</ul>
+              {% endif %}
+              {% if row.diagnosis.suggested_edit %}<p><b>Suggested edit:</b> {{ row.diagnosis.suggested_edit }}</p>{% endif %}
+            </div>
+            {% endif %}
+
+            {% if row.rollouts %}
+            <h4>Rollouts ({{ row.rollouts|length }})</h4>
+            <table class="rollouts">
+              <thead><tr><th>#</th><th>status</th><th>pass</th><th>turns</th><th>verifier</th><th>duration</th><th>cost</th></tr></thead>
+              <tbody>
+                {% for r in row.rollouts %}
+                <tr class="{% if r.status != 'ok' %}infra{% elif r.passed %}pass{% else %}fail{% endif %}">
+                  <td>{{ r.index }}</td>
+                  <td>{{ r.status }}</td>
+                  <td>{% if r.status == 'ok' %}{{ "yes" if r.passed else "no" }}{% else %}—{% endif %}</td>
+                  <td>{{ r.turns }}</td>
+                  <td class="mono">{{ r.verifier_exit_code if r.verifier_exit_code is not none else "—" }}</td>
+                  <td>{{ "%.1f"|format(r.duration_s) }}s</td>
+                  <td class="mono">${{ "%.4f"|format(r.cost_usd) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% set sample = row.rollouts[0] %}
+            {% if sample and sample.transcript %}
+            <h4>Transcript snippet (rollout #{{ sample.index }})</h4>
+            <pre>{% for s in sample.transcript %}[turn {{ s.turn }} · {{ s.role }}] {{ s.text }}
+{% endfor %}</pre>
+            {% endif %}
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Methodology and limitations</h2>
+  <footer>
+    <ul>
+      {% for note in report.notes %}<li>{{ note }}</li>{% endfor %}
+      <li>Wilson score interval at {{ "%.0f"|format(report.config.ci_confidence * 100) }}% confidence, chosen because it stays inside [0, 1] and behaves sensibly for 0/n and n/n.</li>
+      <li>Routing: DROP if the upper bound &lt; {{ "%.0f"|format(report.config.ship_min * 100) }}% or the lower bound ≥ {{ "%.0f"|format(report.config.drop_if_lower_bound_at_or_above * 100) }}%; SHIP if the point estimate is inside
+        [{{ "%.0f"|format(report.config.ship_min * 100) }}%, {{ "%.0f"|format(report.config.ship_max * 100) }}%]; NEEDS-MORE-RUNS when the interval straddles a boundary; any BLOCKER finding → BLOCKED with no calibration spend.</li>
+      <li>The minimal agent loop is not the client's real agent scaffold, so a measured solve rate may differ from the client's own. A pluggable AgentAdapter is the extension point.</li>
+      <li>The task directory layout is an assumption; only loader.py would change for a different format.</li>
+      {% if report.simulated %}<li><b>These numbers are simulations</b> produced by the mock agent from each task's declared true pass rate. They must never be presented as measurements.</li>{% endif %}
+    </ul>
+    {% if extra_variables %}
+    <div class="vars"><b>Extra config</b>:
+      {% for v in extra_variables %}{{ v.name }}={{ v.value }}{% if not loop.last %}, {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+  </footer>
+</div>
+
+<script>
+(function () {
+  function toggle(row, force) {
+    var detail = row.nextElementSibling;
+    if (!detail || !detail.classList.contains('detail-row')) return;
+    var open = force === undefined ? !row.classList.contains('open') : force;
+    row.classList.toggle('open', open);
+    detail.classList.toggle('show', open);
+  }
+  document.querySelectorAll('tr.data-row').forEach(function (row) {
+    row.addEventListener('click', function () { toggle(row); });
+  });
+  document.getElementById('expand-all').addEventListener('click', function () {
+    document.querySelectorAll('tr.data-row').forEach(function (r) { toggle(r, true); });
+  });
+  document.getElementById('collapse-all').addEventListener('click', function () {
+    document.querySelectorAll('tr.data-row').forEach(function (r) { toggle(r, false); });
+  });
+  document.querySelectorAll('table.tasks thead th[data-sort]').forEach(function (th) {
+    th.addEventListener('click', function () {
+      var table = th.closest('table');
+      var tbody = table.tBodies[0];
+      var index = Array.prototype.indexOf.call(th.parentNode.children, th);
+      var dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+      Array.prototype.forEach.call(th.parentNode.children, function (h) { delete h.dataset.dir; });
+      th.dataset.dir = dir;
+      var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr.data-row'));
+      rows.sort(function (a, b) {
+        var av = a.children[index].dataset.sort || a.children[index].textContent;
+        var bv = b.children[index].dataset.sort || b.children[index].textContent;
+        var an = parseFloat(av), bn = parseFloat(bv), cmp;
+        if (!isNaN(an) && !isNaN(bn)) cmp = an - bn;
+        else cmp = String(av).localeCompare(String(bv));
+        return dir === 'asc' ? cmp : -cmp;
+      });
+      rows.forEach(function (r) {
+        var detail = r.nextElementSibling;
+        tbody.appendChild(r);
+        if (detail && detail.classList.contains('detail-row')) tbody.appendChild(detail);
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>
