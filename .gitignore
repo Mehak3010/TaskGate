@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+demo_run/
+audit_*/
+taskgate_out/
+phase4_out/
+taskgate_demo/results/
+tg_audit_log.txt
+.env
+demo_run*/
+audit_*/
