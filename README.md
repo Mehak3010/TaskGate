@@ -52,16 +52,16 @@ Every finding carries a stable rule ID, a file and line, and a concrete fix hint
 
 ```mermaid
 flowchart LR
-    A[Task folder] --> B[Static audit<br/>S001-S010]
-    B --> C[Container audit<br/>D000-D005]
-    C -->|any BLOCKER| X[BLOCKED<br/>no spend]
-    C -->|clean| D[N rollouts<br/>in sandbox]
-    D --> E[Solve rate +<br/>90% interval]
-    E --> F{Route}
-    F --> S[SHIP]
-    F --> R[REWRITE]
-    F --> P[DROP]
-    F --> M[NEEDS-MORE-RUNS]
+    A["Task folder"] --> B["Static audit (S001-S010)"]
+    B --> C["Container audit (D000-D005)"]
+    C -->|"any blocker"| X["BLOCKED, no spend"]
+    C -->|"clean"| D["N rollouts in sandbox"]
+    D --> E["Solve rate with 90 percent interval"]
+    E --> F{"Route"}
+    F --> S["SHIP"]
+    F --> R["REWRITE"]
+    F --> P["DROP"]
+    F --> M["NEEDS-MORE-RUNS"]
 ```
 
 1. **Static audit** reads the task with AST and filesystem rules.
