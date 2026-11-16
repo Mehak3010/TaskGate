@@ -1,0 +1,52 @@
+services:
+  taskgate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: taskgate:latest
+    container_name: taskgate-dev
+    
+    # Mount for live development
+    volumes:
+      - ./taskgate:/app/taskgate
+      - ./tests:/app/tests
+      - ./taskgate_out:/app/taskgate_out
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./README.md:/app/README.md:ro
+    
+    # Environment
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    
+    # For running taskgate commands
+    entrypoint: taskgate
+    command: --help
+    
+    # Interactive terminal
+    stdin_open: true
+    tty: true
+
+  # Dedicated service for tests
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    image: taskgate:test
+    container_name: taskgate-tests
+    
+    volumes:
+      - ./:/app
+      - /app/.venv
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    
+    # Run pytest
+    entrypoint: pytest
+    command: ["--verbose"]
+    
+    stdin_open: true
+    tty: true
