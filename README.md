@@ -27,9 +27,9 @@ Run on the 8-task demo corpus with Docker Desktop, dynamic audit enabled
 | Mutation probe (are the tests able to fail?) | 2 / 2 caught on 6 tasks; 2 / 3 on `t08_borderline` |
 | Blocker findings | 3 (answer leak, network access, failing reference solution) |
 | Warnings | 5 |
-| Routing | 2 BLOCKED, 6 AUDIT-ONLY |
+| Routing | 2 BLOCKED, 6 clear of blockers (AUDIT-ONLY) |
 | Healthy tasks flagged | 0 |
-| Model spend | $0.00 (a blocker stops a task before any rollout) |
+| Model calls needed | None: the audit runs without model spend, and blocked tasks never reach calibration |
 | Wall time, whole corpus | 463.7 s, including image builds and 5 reference runs per task |
 
 ![Per-task routing from the same run](docs/img/routes.png)
