@@ -199,7 +199,7 @@ class CalibrationResult(BaseModel):
     ci_low: float | None = None
     ci_high: float | None = None
     ci_confidence: float = 0.90
-    pass_at_k: dict[str, float] = Field(default_factory=dict)
+    pass_at_k: dict[str, float | None] = Field(default_factory=dict)
     route: Route | None = None
     route_reason: str = ""
     suggested_extra_runs: int | None = None

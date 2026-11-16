@@ -185,3 +185,10 @@ def test_suggest_extra_runs_returns_none_on_an_exact_boundary():
     # A rate sitting exactly on ship_max can never be resolved by more samples:
     # the interval keeps containing the boundary. Saying so beats inventing a number.
     assert suggest_extra_runs(0.30, 20, 0.10, 0.30) is None
+
+def test_build_calibration_result_with_no_valid_rollouts():
+    from taskgate.stats.calibration import build_calibration_result
+
+    r = build_calibration_result(task_id="x", rollouts=[], n_planned=10, model="m")
+    assert r.solve_rate is None
+    assert r.pass_at_k == {"pass@1": None, "pass@3": None, "pass@5": None}
