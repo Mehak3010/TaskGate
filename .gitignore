@@ -14,3 +14,6 @@ audit_*/
 
 taskgate_out/
 run_*.txt
+
+calibrate_out/
+audit_out/
