@@ -11,3 +11,6 @@ tg_audit_log.txt
 .env
 demo_run*/
 audit_*/
+
+taskgate_out/
+run_*.txt
