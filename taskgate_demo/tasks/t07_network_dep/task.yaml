@@ -1,0 +1,11 @@
+id: t07_network_dep
+instruction: Extract the version string from /app/data/meta.txt into /app/out/version.txt.
+difficulty: easy
+author: demo-corpus
+timeout_s: 900
+verifier_cmd: python -m pytest -q /tests
+demo:
+  transcript_profile: normal
+  simulate_dynamic:
+    - D003
+  expected_route: BLOCKED

@@ -1,0 +1,13 @@
+id: t08_borderline
+instruction: Compute hourly request counts and p95 latency from /app/data.
+difficulty: hard
+author: demo-corpus
+timeout_s: 900
+expected_output_format: json
+solution_cmd: bash /solution/solve.sh
+verifier_cmd: python -m pytest -q /tests
+demo:
+  true_pass_rate: 0.35
+  transcript_profile: turn_limit
+  expected_route: NEEDS-MORE-RUNS
+  expected_cause: genuinely_hard

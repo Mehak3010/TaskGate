@@ -1,0 +1,11 @@
+id: t06_flaky_timing
+instruction: Emit /app/out/report.json describing the events in /app/data.
+difficulty: medium
+author: demo-corpus
+timeout_s: 900
+verifier_cmd: python -m pytest -q /tests
+demo:
+  transcript_profile: normal
+  simulate_dynamic:
+    - D001
+  expected_route: BLOCKED
