@@ -1,0 +1,13 @@
+id: t03_trivial_rename
+instruction: Rename /app/data/input.txt to /app/data/output.txt.
+difficulty: trivial
+author: demo-corpus
+timeout_s: 300
+expected_output_format: text
+solution_cmd: bash /solution/solve.sh
+verifier_cmd: python -m pytest -q /tests
+demo:
+  true_pass_rate: 0.95
+  transcript_profile: too_easy
+  expected_route: DROP
+  expected_cause: trivially_solvable

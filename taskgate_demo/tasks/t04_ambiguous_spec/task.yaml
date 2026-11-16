@@ -1,0 +1,12 @@
+id: t04_ambiguous_spec
+instruction: Summarise the errors in /app/data. - intentionally vague
+difficulty: unknown
+author: demo-corpus
+timeout_s: 900
+solution_cmd: bash /solution/solve.sh
+verifier_cmd: python -m pytest -q /tests
+demo:
+  true_pass_rate: 0.0
+  transcript_profile: wrong_path
+  expected_route: REWRITE
+  expected_cause: underspecified_instruction
