@@ -118,7 +118,7 @@
       <div><b>Dynamic audit</b>{% if report.dynamic_audit_ran %}ran{% else %}not run{% endif %}</div>
       <div><b>Git</b><span class="mono">{{ report.config.git_hash or "n/a" }}</span></div>
       <div><b>TaskGate</b><span class="mono">{{ report.config.taskgate_version }} · py{{ report.config.python_version }}</span></div>
-      <div><b>Engineer time saved (est.)</b>{{ report.summary.engineer_minutes_saved }} min
+      <div><b>Engineer time saved (estimate - not measured)</b>{{ report.summary.engineer_minutes_saved }} min
         <span class="sub">≈ {{ "%.1f"|format(report.summary.engineer_minutes_saved / 60) }} h</span></div>
     </div>
     <div class="sub" style="margin-top:6px">

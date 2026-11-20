@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import webbrowser
 from pathlib import Path
 from typing import Annotated, Optional
@@ -91,6 +92,7 @@ def _config(
             else defaults.max_tool_output_chars
         ),
         tpm=tpm if tpm is not None else defaults.tpm,
+        max_completion_tokens=defaults.completion_tokens,
         seed=seed,
         out_dir=str(out),
         git_hash=detect_git_hash(),
@@ -112,6 +114,21 @@ def _emit(report: Report, out: Path, *, html: bool = True) -> Path:
     return json_path
 
 
+def _wait_for_docker(attempts: int = 3, delay_s: float = 2.0) -> bool:
+    """Probe for a container runtime, re-probing a few times before giving up.
+
+    A daemon that is starting (or was just restarted) can be reachable a few
+    seconds later, so a single failed probe is not enough to declare Docker down.
+    """
+    if docker_available():
+        return True
+    for _ in range(max(0, attempts)):
+        time.sleep(delay_s)
+        if docker_available():
+            return True
+    return False
+
+
 def _run(
     tasks,
     config: RunConfig,
@@ -120,13 +137,23 @@ def _run(
     label: str,
 ) -> Report:
     console.print(f"[bold]{label}[/]: {len(tasks)} task(s), model {config.model}")
-    if options.calibrate and (config.mock or config.model == "mock"):
+    explicit_mock = bool(config.mock or config.model in ("mock", ""))
+    if options.calibrate and explicit_mock:
         print_note("mock mode: no API key needed, no containers, everything labelled SIMULATED.", console)
-    if options.use_docker and not docker_available():
-        if options.calibrate:
-            print_note("Docker daemon not reachable: falling back to static audit + mock calibration.", console)
-        else:
-            print_note("Docker daemon not reachable: static audit only; dynamic findings are simulated.", console)
+    if options.use_docker and not explicit_mock and not _wait_for_docker():
+        # A real calibration needs a container runtime. Degrading to the mock
+        # agent here would publish simulations as if they were measurements, so
+        # refuse instead of falling back silently.
+        print_note(
+            "Docker daemon not reachable after re-probing: a real calibration needs a "
+            "container runtime, and TaskGate will not fall back to the mock agent. "
+            "Start Docker and retry, or pass --mock for a clearly-labelled simulation.",
+            console,
+            style="bold red",
+        )
+        raise typer.Exit(code=3)
+    if options.use_docker and explicit_mock and not docker_available():
+        print_note("Docker daemon not reachable: static audit only; dynamic findings are simulated.", console)
 
     def on_task(task, findings):
         blockers = sum(1 for f in findings if f.severity.value == "BLOCKER")

@@ -64,6 +64,14 @@ def test_groq_defaults_bound_the_token_budget():
     assert defaults.max_tool_output_chars == 1500
     assert defaults.max_turns == 12
     assert defaults.tpm == 8000
+    # gpt-oss is a reasoning model: the completion cap must leave headroom.
+    # Groq charges the *requested* cap against 8K TPM, so 2000 keeps one
+    # reservation inside the window while still leaving reasoning space.
+    assert defaults.completion_tokens == 2000
+
+
+def test_openrouter_leaves_the_completion_cap_unset():
+    assert provider_defaults("openrouter").completion_tokens is None
 
 
 def test_apply_defaults_fills_only_unset_fields():
@@ -71,11 +79,16 @@ def test_apply_defaults_fills_only_unset_fields():
     apply_defaults(config)
     assert config.max_tool_output_chars == 1500
     assert config.tpm == 8000
+    assert config.max_completion_tokens == 2000
 
     config = RunConfig(provider="groq", max_tool_output_chars=99, tpm=500)
     apply_defaults(config)
     assert config.max_tool_output_chars == 99
     assert config.tpm == 500
+
+    config = RunConfig(provider="openrouter")
+    apply_defaults(config)
+    assert config.max_completion_tokens is None
 
 
 def test_free_provider_costs_zero():

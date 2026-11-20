@@ -179,6 +179,16 @@ class Rollout(BaseModel):
     verifier_exit_code: int | None = None
     verifier_output: str = ""
     error: str | None = None
+    #: True when the rollout failed because the model never produced a parseable
+    #: tool call (e.g. Groq's ``tool_use_failed``), even after the per-turn
+    #: retries. Such a rollout stays counted (a task failure), unlike an infra
+    #: error, but it is tracked separately so the report can disclose it.
+    tool_call_failed: bool = False
+    #: The model's own rejected output when a turn failed on an unparseable tool
+    #: call, already scrubbed of secrets and capped at 500 chars. Kept for offline
+    #: diagnosis; it is written to ``report.json`` but deliberately not rendered in
+    #: ``report.html``.
+    failed_generation: str | None = None
     simulated: bool = False
     transcript: list[TranscriptStep] = Field(default_factory=list)
 
@@ -203,6 +213,11 @@ class CalibrationResult(BaseModel):
     n_timeouts: int = 0
     #: Rollouts stopped by a provider daily quota; excluded from the denominator.
     n_rate_limited: int = 0
+    #: Rollouts that failed because the model never produced a parseable tool
+    #: call (Groq's ``tool_use_failed``), even after the per-turn retries. These
+    #: are counted as *task* failures, so they are reported separately from
+    #: infrastructure errors rather than hidden inside ``n_infra_errors``.
+    n_tool_call_failures: int = 0
     solve_rate: float | None = None
     ci_low: float | None = None
     ci_high: float | None = None
@@ -266,6 +281,10 @@ class RunConfig(BaseModel):
     max_tool_output_chars: int | None = None
     #: Tokens-per-minute budget for the pacer; None disables pacing.
     tpm: int | None = None
+    #: Completion cap sent as ``max_completion_tokens``; None sends none. A
+    #: reasoning model (gpt-oss) spends part of this on hidden reasoning tokens,
+    #: so the cap must be generous or the visible content comes back empty.
+    max_completion_tokens: int | None = None
     audit_reruns: int = 5
     out_dir: str = ""
     seed: int = 1234
@@ -419,6 +438,10 @@ class Summary(BaseModel):
     total_valid_rollouts: int = 0
     total_infra_errors: int = 0
     total_rate_limited: int = 0
+    #: Rollouts that failed on an unparseable model tool call (counted as task
+    #: failures, not infra errors); disclosed separately so the README can name
+    #: them instead of letting them inflate the failure count silently.
+    total_tool_call_failures: int = 0
     #: Total tokens the provider reported for all rollouts (input + output).
     total_tokens: int = 0
     infra_error_rate: float = 0.0

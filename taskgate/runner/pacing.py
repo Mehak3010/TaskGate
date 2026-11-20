@@ -62,3 +62,18 @@ class TokenPacer:
             oldest = self._events[0][0]
             wait = self.window_s - (now - oldest)
             await self._sleep(max(wait, 0.01))
+
+    def time_until_room(self, estimated_tokens: int) -> float:
+        """Seconds until ``estimated_tokens`` fit in the window (0 if they fit now).
+
+        Used after a provider *still* returned a tokens-per-minute 429 despite
+        the reservation: the caller sleeps exactly until the window has drained
+        enough, rather than guessing a backoff. Never returns a negative value.
+        """
+        now = self._clock()
+        self._prune(now)
+        estimate = max(0, int(estimated_tokens))
+        if self._used() + estimate <= self.budget or not self._events:
+            return 0.0
+        oldest = self._events[0][0]
+        return max(self.window_s - (now - oldest), 0.0)

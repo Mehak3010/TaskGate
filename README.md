@@ -48,6 +48,17 @@ Run on the 8-task demo corpus with Docker Desktop, dynamic audit enabled
 
 Every finding carries a stable rule ID, a file and line, and a concrete fix hint.
 
+## Live calibration
+
+Placeholder - no live-model numbers are published yet. This section will carry the
+results of a completed `taskgate calibrate` run against a free-tier model: per task
+the valid / failed / tool-call-failure / infrastructure counts, tokens per rollout,
+wall time, the Wilson interval and the routed verdict, plus the raw summary block
+from `report.json`.
+
+Until then, do not read the demo figures above as live measurements: they come from
+the mock agent, and every mock report carries a visible `SIMULATED` banner.
+
 ## How it works
 
 ```mermaid
@@ -132,10 +143,33 @@ Any BLOCKER stops the task. No calibration spend happens for it.
   | Verdict | Condition |
   |---------|-----------|
   | `BLOCKED` | any BLOCKER finding |
-  | `NEEDS-MORE-RUNS` | fewer than 5 valid rollouts, or the interval straddles a window boundary |
-  | `DROP` | upper bound below the window, or lower bound at or above 80% |
+  | `NEEDS-MORE-RUNS` | fewer than 5 valid rollouts |
+  | `DROP` | upper bound of the interval below the window (too hard), or lower bound at or above 80% (degenerately easy) |
   | `SHIP` | point estimate inside the window (default 10-30%) |
-  | `REWRITE` | out of window and unresolved, or a recoverable cause diagnosed |
+  | `NEEDS-MORE-RUNS` | the interval straddles a window boundary |
+  | `REWRITE` | interval sits above the window but is not degenerate, or is out of window and unresolved |
+
+  The **5-valid-rollout floor is fixed** and is deliberately *not* tied to
+  `--rollouts`. If a run requests fewer than 5 rollouts, every task comes back as
+  `NEEDS-MORE-RUNS` no matter how decisive its point estimate looks: a small
+  sample cannot buy a verdict. Ask for at least 5 (the default is 20) to get a
+  real route. A recoverable diagnosis (see below) can turn a `DROP` or a
+  *straddling* `NEEDS-MORE-RUNS` into `REWRITE`, but it can never override the
+  too-few-rollouts verdict.
+
+### Rollout outcomes
+
+Valid rollouts (the solve-rate denominator) are the ones that ran to completion.
+Everything else is counted separately rather than hidden inside the failure rate:
+
+* **infra errors** -- the sandbox or provider failed (Docker, timeout, an
+  unrecoverable HTTP error). Excluded from the denominator.
+* **rate-limited** -- the provider's daily quota ran out; the run stops cleanly
+  and resumes tomorrow.
+* **tool-call failures** -- the model's *own* tool call was unparseable
+  (`tool_use_failed`), even after the per-turn retries. These are counted as task
+  failures, but are disclosed separately so they do not silently inflate the
+  failure count.
 
 ## Diagnosis
 

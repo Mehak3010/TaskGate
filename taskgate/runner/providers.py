@@ -50,6 +50,10 @@ class ProviderDefaults:
     tpm: int | None
     #: Chat-completions endpoint when no ``--base-url`` is given; None means required.
     endpoint: str | None
+    #: Generous completion cap sent as ``max_completion_tokens``; None sends none.
+    #: Reasoning models spend part of this on hidden reasoning tokens, so a small
+    #: cap (e.g. 16) returns ``finish_reason=length`` with *empty* content.
+    completion_tokens: int | None = None
 
 
 _DEFAULTS: dict[str, ProviderDefaults] = {
@@ -57,7 +61,12 @@ _DEFAULTS: dict[str, ProviderDefaults] = {
     "openrouter": ProviderDefaults(4000, 30, None, _ENDPOINTS["openrouter"]),
     # Groq's free tier binds on tokens per minute, not requests: 8K TPM, 30 RPM,
     # 1K RPD, 200K TPD. Small tool output and few turns keep one rollout cheap.
-    "groq": ProviderDefaults(1500, 12, 8000, _ENDPOINTS["groq"]),
+    # gpt-oss is a reasoning model, so the completion cap must leave headroom for
+    # reasoning tokens or the visible content comes back empty. Groq counts the
+    # *requested* tokens (prompt + max_completion_tokens) against the 8K/min
+    # budget, so the pacer reserves this cap on every request; 2000 leaves
+    # reasoning headroom while keeping a single reservation inside the window.
+    "groq": ProviderDefaults(1500, 12, 8000, _ENDPOINTS["groq"], completion_tokens=2000),
     # Anything OpenAI-shaped: the caller must pass --base-url.
     "openai-compatible": ProviderDefaults(4000, 30, None, None),
 }
@@ -126,3 +135,5 @@ def apply_defaults(config) -> None:
         config.max_tool_output_chars = defaults.max_tool_output_chars
     if getattr(config, "tpm", None) is None:
         config.tpm = defaults.tpm
+    if getattr(config, "max_completion_tokens", None) is None:
+        config.max_completion_tokens = defaults.completion_tokens

@@ -171,6 +171,40 @@ def test_diagnosis_never_touches_ship_or_blocked():
     )
 
 
+def test_needs_more_runs_survives_a_recoverable_cause():
+    """Too few valid rollouts is a sampling verdict, not a fixable editing one.
+
+    README: "<5 valid rollouts -> NEEDS-MORE-RUNS". A recoverable diagnosis must
+    not silently promote it to REWRITE (which would hide the missing sample).
+    """
+    route, reason = apply_diagnosis(
+        Route.NEEDS_MORE_RUNS,
+        "only 1 valid rollout(s); too few to route reliably",
+        "environment_issue",
+        "heuristic",
+        underpowered=True,
+    )
+    assert route is Route.NEEDS_MORE_RUNS
+    assert "overridden" not in reason
+
+
+def test_needs_more_runs_from_a_straddle_can_still_be_rewritten():
+    """A straddle on an *adequate* sample is a different situation.
+
+    There the rollouts exist and the interval is merely inconclusive, so a
+    recoverable diagnosis may legitimately resolve it to REWRITE.
+    """
+    route, reason = apply_diagnosis(
+        Route.NEEDS_MORE_RUNS,
+        "CI [0.30, 0.34] straddles a window boundary",
+        "underspecified_instruction",
+        "heuristic",
+        underpowered=False,
+    )
+    assert route is Route.REWRITE
+    assert "overridden" in reason
+
+
 # ---------------------------------------------------------------- extra runs
 def test_suggest_extra_runs_resolves_a_straddle():
     extra = suggest_extra_runs(0.35, 20, 0.10, 0.30)

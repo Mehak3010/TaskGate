@@ -53,6 +53,7 @@ from .runner.providers import (
 )
 from .runner.sandbox import Sandbox, docker_available
 from .stats.calibration import (
+    MIN_ROLLOUTS_FOR_DECISION,
     apply_diagnosis,
     build_calibration_result,
     route_calibration_result,
@@ -124,11 +125,14 @@ def _dynamic_evidence(
     return DynamicAuditEvidence.skipped("dynamic audit did not run")
 
 
-def _is_mock(config: RunConfig, docker_ok: bool) -> bool:
-    if config.mock or config.model in ("mock", ""):
-        return True
-    # A real model without a container runtime cannot be measured; degrade.
-    return not docker_ok
+def _is_mock(config: RunConfig) -> bool:
+    """True only for an *explicit* mock run (``--mock`` / ``--model mock``).
+
+    A real model with no container runtime must never be silently measured
+    through the mock agent: the CLI refuses that combination instead (see
+    ``cli._wait_for_docker``), so calibration simulation is opt-in only.
+    """
+    return bool(config.mock or config.model in ("mock", ""))
 
 
 def _task_simulated(ctx: PipelineContext, options: PipelineOptions) -> bool:
@@ -231,6 +235,7 @@ def _real_job(
             base_url=config.base_url,
             max_turns=config.max_turns,
             max_tool_output_chars=config.max_tool_output_chars,
+            max_completion_tokens=config.max_completion_tokens,
             temperature=config.temperature,
             timeout_s=config.timeout_s,
             seed=config.seed + index,
@@ -299,10 +304,10 @@ async def run_pipeline(
     started = time.perf_counter()
     apply_defaults(config)  # fill provider-derived tool-output / TPM defaults
     ctx = PipelineContext(docker_ok=bool(options.use_docker and docker_available()))
-    # Calibration is simulated only when it actually runs through the mock agent
-    # (mock config, or no container runtime to measure with). An audit-only run
-    # has no calibration, so it stays a real run rather than a simulation.
-    ctx.simulated = bool(options.calibrate and _is_mock(config, ctx.docker_ok))
+    # Calibration is simulated only when an explicit mock run asks for it. A real
+    # model with no container runtime is never silently degraded to the mock
+    # agent -- the CLI refuses that combination before reaching the pipeline.
+    ctx.simulated = bool(options.calibrate and _is_mock(config))
 
     if config.git_hash is None:
         config.git_hash = detect_git_hash()
@@ -483,6 +488,7 @@ async def _finalise_task(
                 calibration.route_reason,
                 diagnosis.likely_cause,
                 diagnosis.source,
+                underpowered=calibration.n_valid < MIN_ROLLOUTS_FOR_DECISION,
             )
             calibration.route = new_route
             calibration.route_reason = new_reason
@@ -521,6 +527,7 @@ def _summarise(
     total_valid = 0
     total_infra = 0
     total_rate_limited = 0
+    total_tool_call_failures = 0
     total_tokens = 0
 
     for report in task_reports:
@@ -535,6 +542,7 @@ def _summarise(
             total_valid += cal.n_valid
             total_infra += cal.n_infra_errors
             total_rate_limited += cal.n_rate_limited
+            total_tool_call_failures += cal.n_tool_call_failures
             total_tokens += sum(r.tokens_total for r in cal.rollouts)
             if cal.solve_rate is not None and config.ship_min <= cal.solve_rate <= config.ship_max:
                 n_in_window += 1
@@ -552,6 +560,7 @@ def _summarise(
         total_valid_rollouts=total_valid,
         total_infra_errors=total_infra,
         total_rate_limited=total_rate_limited,
+        total_tool_call_failures=total_tool_call_failures,
         total_tokens=total_tokens,
         infra_error_rate=round(total_infra / total_rollouts, 4) if total_rollouts else 0.0,
         wall_time_s=round(wall_time_s, 3),
