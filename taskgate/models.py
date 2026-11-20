@@ -166,8 +166,10 @@ class TranscriptStep(BaseModel):
 
 class Rollout(BaseModel):
     index: int
-    #: infra_error / timeout rollouts are excluded from the denominator.
-    status: Literal["ok", "infra_error", "timeout", "error"] = "ok"
+    #: Only "ok" rollouts count in the denominator. "infra_error", "timeout" and
+    #: "error" are excluded; "rate_limited" is a provider daily-quota stop, not a
+    #: task failure, so it is excluded too and the run is marked resumable.
+    status: Literal["ok", "infra_error", "timeout", "error", "rate_limited"] = "ok"
     passed: bool = False
     turns: int = 0
     duration_s: float = 0.0
@@ -184,6 +186,10 @@ class Rollout(BaseModel):
     def counted(self) -> bool:
         return self.status == "ok"
 
+    @property
+    def tokens_total(self) -> int:
+        return self.tokens_in + self.tokens_out
+
 
 class CalibrationResult(BaseModel):
     task_id: str
@@ -195,6 +201,8 @@ class CalibrationResult(BaseModel):
     n_passed: int = 0
     n_infra_errors: int = 0
     n_timeouts: int = 0
+    #: Rollouts stopped by a provider daily quota; excluded from the denominator.
+    n_rate_limited: int = 0
     solve_rate: float | None = None
     ci_low: float | None = None
     ci_high: float | None = None
@@ -237,6 +245,12 @@ class RunConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     model: str = "mock"
+    #: "openrouter" | "groq" | "openai-compatible".
+    provider: str = "openrouter"
+    #: Overrides the provider's default chat-completions endpoint.
+    base_url: str | None = None
+    #: One cheap request before any image build/rollout; skipped for mock runs.
+    skip_preflight: bool = False
     rollouts: int = 20
     concurrency: int = 4
     ship_min: float = 0.10
@@ -248,6 +262,10 @@ class RunConfig(BaseModel):
     budget_usd: float | None = None
     timeout_s: int = 900
     max_turns: int = 30
+    #: Provider-derived; None means "use the provider default" (see providers.py).
+    max_tool_output_chars: int | None = None
+    #: Tokens-per-minute budget for the pacer; None disables pacing.
+    tpm: int | None = None
     audit_reruns: int = 5
     out_dir: str = ""
     seed: int = 1234
@@ -400,8 +418,13 @@ class Summary(BaseModel):
     total_rollouts: int = 0
     total_valid_rollouts: int = 0
     total_infra_errors: int = 0
+    total_rate_limited: int = 0
+    #: Total tokens the provider reported for all rollouts (input + output).
+    total_tokens: int = 0
     infra_error_rate: float = 0.0
     wall_time_s: float = 0.0
+    #: "completed" | "rate-limited, resume tomorrow" | "aborted: <kind>".
+    run_status: str = "completed"
     engineer_minutes_saved: int = 0
     findings_by_severity: dict[str, int] = Field(default_factory=dict)
 

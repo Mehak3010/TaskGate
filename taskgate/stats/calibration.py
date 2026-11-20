@@ -240,6 +240,7 @@ def build_calibration_result(
     n_passed = sum(1 for r in valid if r.passed)
     n_infra = sum(1 for r in rollouts if r.status == "infra_error")
     n_timeout = sum(1 for r in rollouts if r.status == "timeout")
+    n_rate_limited = sum(1 for r in rollouts if r.status == "rate_limited")
 
     solve_rate = (n_passed / n_valid) if n_valid else None
     ci_low, ci_high = (wilson_interval(n_passed, n_valid, confidence) if n_valid else (None, None))
@@ -253,6 +254,7 @@ def build_calibration_result(
         n_passed=n_passed,
         n_infra_errors=n_infra,
         n_timeouts=n_timeout,
+        n_rate_limited=n_rate_limited,
         solve_rate=solve_rate,
         ci_low=ci_low,
         ci_high=ci_high,
