@@ -7,6 +7,10 @@ uses them for a spend guard, not for invoicing. Override with --price-in
 
 from __future__ import annotations
 
+#: Free tiers charge nothing. A token budget still applies, but the *dollar*
+#: spend is zero, so the cost column and the budget guard see $0.
+FREE_PROVIDERS: frozenset[str] = frozenset({"groq"})
+
 #: USD per 1M tokens: (input, output).
 PRICING: dict[str, tuple[float, float]] = {
     "mock": (0.15, 0.60),
@@ -36,6 +40,12 @@ def estimate_cost_usd(
     tokens_in: int,
     tokens_out: int,
     override: tuple[float, float] | None = None,
+    *,
+    provider: str | None = None,
 ) -> float:
+    # A free-tier provider costs $0 whatever the model name is: the binding
+    # limit there is tokens, not dollars, so the budget guard must not fire.
+    if provider is not None and provider in FREE_PROVIDERS:
+        return 0.0
     price_in, price_out = price_for(model, override)
     return round(tokens_in / 1_000_000 * price_in + tokens_out / 1_000_000 * price_out, 6)

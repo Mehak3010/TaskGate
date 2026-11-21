@@ -17,3 +17,11 @@ run_*.txt
 
 calibrate_out/
 audit_out/
+
+# Live-run scratch: task corpora and their reports never belong in git.
+live_tasks/
+live_out*/
+live_smoke*/
+
+live_final/
+live_*/

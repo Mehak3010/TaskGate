@@ -44,8 +44,16 @@ from .models import (
 )
 from .runner.executor import Executor, ExecutorReport, Job
 from .runner.mock_agent import MockAgent
+from .runner.pacing import TokenPacer
+from .runner.providers import (
+    api_key_for,
+    apply_defaults,
+    key_env_names,
+    provider_display,
+)
 from .runner.sandbox import Sandbox, docker_available
 from .stats.calibration import (
+    MIN_ROLLOUTS_FOR_DECISION,
     apply_diagnosis,
     build_calibration_result,
     route_calibration_result,
@@ -117,11 +125,14 @@ def _dynamic_evidence(
     return DynamicAuditEvidence.skipped("dynamic audit did not run")
 
 
-def _is_mock(config: RunConfig, docker_ok: bool) -> bool:
-    if config.mock or config.model in ("mock", ""):
-        return True
-    # A real model without a container runtime cannot be measured; degrade.
-    return not docker_ok
+def _is_mock(config: RunConfig) -> bool:
+    """True only for an *explicit* mock run (``--mock`` / ``--model mock``).
+
+    A real model with no container runtime must never be silently measured
+    through the mock agent: the CLI refuses that combination instead (see
+    ``cli._wait_for_docker``), so calibration simulation is opt-in only.
+    """
+    return bool(config.mock or config.model in ("mock", ""))
 
 
 def _task_simulated(ctx: PipelineContext, options: PipelineOptions) -> bool:
@@ -155,6 +166,9 @@ def _build_jobs(
     tasks: list[Task],
     config: RunConfig,
     ctx: PipelineContext,
+    *,
+    api_key: str | None = None,
+    pacer: TokenPacer | None = None,
 ) -> list[Job]:
     jobs: list[Job] = []
     if ctx.simulated:
@@ -184,7 +198,7 @@ def _build_jobs(
                 Job(
                     task_id=task.task_id,
                     index=index,
-                    run=_real_job(task, index, config),
+                    run=_real_job(task, index, config, api_key, pacer),
                 )
             )
     return jobs
@@ -197,27 +211,60 @@ def _bind(coro_fn, index: int):
     return runner
 
 
-def _real_job(task: Task, index: int, config: RunConfig):
+def _real_job(
+    task: Task,
+    index: int,
+    config: RunConfig,
+    api_key: str | None,
+    pacer: TokenPacer | None,
+):
     async def runner():
         from .runner.agent import AgentRunner  # imported lazily: needs docker + key
 
-        key = api_key_from_env()
+        key = api_key
         if not key:
-            raise RuntimeError("OPENROUTER_API_KEY is not set")
+            names = ", ".join(key_env_names(config.provider))
+            raise RuntimeError(f"{names} is not set")
         box = Sandbox(task, rebuild=False)
         runner_obj = AgentRunner(
             task,
             box,
             model=config.model,
             api_key=key,
+            provider=config.provider,
+            base_url=config.base_url,
             max_turns=config.max_turns,
+            max_tool_output_chars=config.max_tool_output_chars,
+            max_completion_tokens=config.max_completion_tokens,
             temperature=config.temperature,
             timeout_s=config.timeout_s,
             seed=config.seed + index,
+            pacer=pacer,
         )
         return await runner_obj.run_rollout(index)
 
     return runner
+
+
+async def _preflight(config: RunConfig) -> tuple[bool, str]:
+    """One cheap request before any image build or rollout.
+
+    Returns ``(ok, message)``. The message names the provider and the HTTP status
+    but never the key. A missing key is reported with the *variable name* only.
+    """
+    from .runner.agent import preflight
+
+    display = provider_display(config.provider)
+    key = api_key_for(config.provider)
+    if not key:
+        names = " or ".join(key_env_names(config.provider))
+        return False, f"{display}: no API key found. Set {names} and retry."
+    return await preflight(
+        provider=config.provider,
+        model=config.model,
+        api_key=key,
+        base_url=config.base_url,
+    )
 
 
 async def _diagnose(
@@ -255,11 +302,12 @@ async def run_pipeline(
 ) -> Report:
     options = options or PipelineOptions()
     started = time.perf_counter()
+    apply_defaults(config)  # fill provider-derived tool-output / TPM defaults
     ctx = PipelineContext(docker_ok=bool(options.use_docker and docker_available()))
-    # Calibration is simulated only when it actually runs through the mock agent
-    # (mock config, or no container runtime to measure with). An audit-only run
-    # has no calibration, so it stays a real run rather than a simulation.
-    ctx.simulated = bool(options.calibrate and _is_mock(config, ctx.docker_ok))
+    # Calibration is simulated only when an explicit mock run asks for it. A real
+    # model with no container runtime is never silently degraded to the mock
+    # agent -- the CLI refuses that combination before reaching the pipeline.
+    ctx.simulated = bool(options.calibrate and _is_mock(config))
 
     if config.git_hash is None:
         config.git_hash = detect_git_hash()
@@ -294,7 +342,24 @@ async def run_pipeline(
     )
     report = ExecutorReport()
     if calibratable:
-        jobs = _build_jobs(calibratable, config, ctx)
+        # Preflight one cheap request before building any image or starting any
+        # rollout, so a bad key/model fails in seconds. Mock runs never touch the
+        # network and skip it entirely.
+        if not ctx.simulated and not config.skip_preflight:
+            ok, message = await _preflight(config)
+            ctx.notes.append(f"preflight: {message}")
+            if not ok:
+                ctx.notes.append(
+                    "preflight failed: no images were built and no rollouts were started."
+                )
+                calibratable = []
+        elif not ctx.simulated:
+            ctx.notes.append("preflight skipped (--skip-preflight).")
+
+    if calibratable:
+        api_key = None if ctx.simulated else api_key_for(config.provider)
+        pacer = TokenPacer(config.tpm) if (config.tpm and not ctx.simulated) else None
+        jobs = _build_jobs(calibratable, config, ctx, api_key=api_key, pacer=pacer)
         executor = Executor(
             concurrency=config.concurrency,
             budget_usd=config.budget_usd,
@@ -303,10 +368,21 @@ async def run_pipeline(
         )
         report = await executor.run(jobs)
 
-    if report.aborted:
+    if report.abort_kind == "budget":
         ctx.notes.append(
             f"budget guard tripped at ${config.budget_usd}: "
             f"{report.skipped_jobs} rollout(s) were not run."
+        )
+    elif report.abort_kind == "auth":
+        ctx.notes.append(
+            f"run aborted (authentication/authorisation): {report.abort_reason} "
+            f"{report.skipped_jobs} rollout(s) were not run and nothing was scored."
+        )
+    elif report.abort_kind == "quota":
+        ctx.notes.append(
+            "run stopped: rate-limited, resume tomorrow. The provider's daily quota "
+            "is exhausted, so this is not a task failure and none of these rollouts "
+            "count in the solve rate. Re-run tomorrow to finish the remaining rollouts."
         )
 
     # -- stage 4 + 5: route and diagnose -----------------------------------
@@ -317,7 +393,20 @@ async def run_pipeline(
             await _finalise_task(task, findings, report.rollouts, config, options, ctx)
         )
 
-    summary = _summarise(task_reports, config, wall_time_s=time.perf_counter() - started)
+    run_status = "completed"
+    if report.abort_kind == "quota":
+        run_status = "rate-limited, resume tomorrow"
+    elif report.abort_kind == "auth":
+        run_status = "aborted: auth"
+    elif report.abort_kind == "budget":
+        run_status = "aborted: budget"
+
+    summary = _summarise(
+        task_reports,
+        config,
+        wall_time_s=time.perf_counter() - started,
+        run_status=run_status,
+    )
     report_simulated = any(t.simulated for t in task_reports)
     if report_simulated:
         ctx.notes.append(
@@ -399,6 +488,7 @@ async def _finalise_task(
                 calibration.route_reason,
                 diagnosis.likely_cause,
                 diagnosis.source,
+                underpowered=calibration.n_valid < MIN_ROLLOUTS_FOR_DECISION,
             )
             calibration.route = new_route
             calibration.route_reason = new_reason
@@ -421,7 +511,13 @@ async def _finalise_task(
     )
 
 
-def _summarise(task_reports: list[TaskReport], config: RunConfig, *, wall_time_s: float) -> Summary:
+def _summarise(
+    task_reports: list[TaskReport],
+    config: RunConfig,
+    *,
+    wall_time_s: float,
+    run_status: str = "completed",
+) -> Summary:
     counts: dict[str, int] = {r.value: 0 for r in Route}
     n_findings = 0
     findings_by_severity = {"BLOCKER": 0, "WARN": 0, "INFO": 0}
@@ -430,6 +526,9 @@ def _summarise(task_reports: list[TaskReport], config: RunConfig, *, wall_time_s
     total_rollouts = 0
     total_valid = 0
     total_infra = 0
+    total_rate_limited = 0
+    total_tool_call_failures = 0
+    total_tokens = 0
 
     for report in task_reports:
         counts[report.route.value] += 1
@@ -442,6 +541,9 @@ def _summarise(task_reports: list[TaskReport], config: RunConfig, *, wall_time_s
             total_rollouts += cal.n_planned
             total_valid += cal.n_valid
             total_infra += cal.n_infra_errors
+            total_rate_limited += cal.n_rate_limited
+            total_tool_call_failures += cal.n_tool_call_failures
+            total_tokens += sum(r.tokens_total for r in cal.rollouts)
             if cal.solve_rate is not None and config.ship_min <= cal.solve_rate <= config.ship_max:
                 n_in_window += 1
 
@@ -457,8 +559,12 @@ def _summarise(task_reports: list[TaskReport], config: RunConfig, *, wall_time_s
         total_rollouts=total_rollouts,
         total_valid_rollouts=total_valid,
         total_infra_errors=total_infra,
+        total_rate_limited=total_rate_limited,
+        total_tool_call_failures=total_tool_call_failures,
+        total_tokens=total_tokens,
         infra_error_rate=round(total_infra / total_rollouts, 4) if total_rollouts else 0.0,
         wall_time_s=round(wall_time_s, 3),
+        run_status=run_status,
         engineer_minutes_saved=engineer_minutes,
         findings_by_severity=findings_by_severity,
     )

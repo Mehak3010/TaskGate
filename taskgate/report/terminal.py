@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from ..models import Report, Route, Severity, TaskReport
@@ -80,13 +81,20 @@ def print_report_summary(report: Report, console: Console | None = None) -> None
         f"[bold]in window:[/] {report.summary.n_in_window}/{report.summary.n_tasks}   "
         f"[bold]cost:[/] ${report.summary.total_cost_usd:.4f}   "
         f"[bold]wall:[/] {report.summary.wall_time_s:.1f}s   "
-        f"[bold]engineer time saved (est.):[/] {report.summary.engineer_minutes_saved} min"
+        f"[bold]engineer time saved (estimate - not measured):[/] {report.summary.engineer_minutes_saved} min"
     )
     if report.simulated:
         console.print("[bold yellow]SIMULATED[/]: mock-mode numbers, not measurements.", highlight=False)
     if report.docker_available is False:
         console.print(
             "[yellow]Docker unreachable:[/] static audit only; dynamic findings are simulated.",
+            highlight=False,
+        )
+    if report.summary.total_tool_call_failures:
+        console.print(
+            f"[yellow]tool-call failures:[/] "
+            f"{report.summary.total_tool_call_failures} rollout(s) failed because the "
+            "model's own tool call was unparseable (counted as task failures, not infra).",
             highlight=False,
         )
     if report.audit_error_rate > 0.10:
@@ -96,6 +104,25 @@ def print_report_summary(report: Report, console: Console | None = None) -> None
             "[bold red]Their findings are incomplete — do not read them as clean.[/]",
             highlight=False,
         )
+    for task_id, message in rollout_errors(report):
+        # The provider's own words (already scrubbed at the source) must be
+        # visible here too, not only in report.json. Escaped: a bracketed
+        # "[code=...]" suffix is Rich markup, not text, until we escape it.
+        console.print(f"[bold red]{task_id}:[/] {escape(message)}", highlight=False)
+
+
+def rollout_errors(report: Report) -> list[tuple[str, str]]:
+    """Distinct per-rollout errors, in task order: ``[(task_id, message), ...]``."""
+    seen: list[tuple[str, str]] = []
+    for task in report.tasks:
+        calibration = task.calibration
+        if calibration is None:
+            continue
+        for message in dict.fromkeys(r.error for r in calibration.rollouts if r.error):
+            pair = (task.task_id, message)
+            if pair not in seen:
+                seen.append(pair)
+    return seen
 
 
 def findings_table(task: TaskReport) -> Table:

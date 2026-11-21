@@ -19,6 +19,14 @@ from ..models import (
 
 PASS_AT_K_VALUES = (1, 3, 5)
 
+#: Below this many *valid* rollouts a task is not routed on its statistics at
+#: all -- the verdict is NEEDS-MORE-RUNS regardless of the point estimate, and
+#: no diagnosis may override it (see ``apply_diagnosis``). This is a fixed floor,
+#: intentionally decoupled from ``--rollouts``: asking for fewer rollouts than
+#: the floor cannot buy a decisive verdict, and a recoverable diagnosis cannot
+#: substitute for the rollouts that were never run.
+MIN_ROLLOUTS_FOR_DECISION = 5
+
 
 # --------------------------------------------------------------------------
 # intervals
@@ -119,7 +127,7 @@ def route_task(
     ship_max: float = 0.30,
     drop_easy: float = 0.80,
     has_blocker: bool = False,
-    min_rollouts_for_decision: int = 5,
+    min_rollouts_for_decision: int = MIN_ROLLOUTS_FOR_DECISION,
     confidence: float = 0.90,
 ) -> tuple[Route, str, int | None]:
     """Route one task from its statistics alone.
@@ -202,14 +210,26 @@ def apply_diagnosis(
     base_reason: str,
     likely_cause: str | None,
     diagnosis_source: str,
+    *,
+    underpowered: bool = False,
 ) -> tuple[Route, str]:
     """Let an actionable diagnosis turn a DROP / NEEDS-MORE-RUNS into a REWRITE.
 
     A task whose failures are explained by an underspecified instruction or a
     too-strict test is not a lost task: it is a rewrite. A statistically decisive
     verdict from a cause nobody can fix (``genuinely_hard``) is left alone.
+
+    ``NEEDS-MORE-RUNS`` covers two different situations:
+
+    * the interval *straddles* a boundary on an adequate sample -- a rewrite may
+      legitimately resolve it, so the override applies;
+    * the sample is simply too small (``underpowered``) -- no diagnosis can
+      substitute for the missing rollouts, so the verdict must survive and ask
+      for more runs. This is the README's "<5 valid rollouts" rule.
     """
     if base_route in (Route.BLOCKED, Route.SHIP):
+        return base_route, base_reason
+    if base_route is Route.NEEDS_MORE_RUNS and underpowered:
         return base_route, base_reason
     if likely_cause in RECOVERABLE_CAUSES:
         return (
@@ -240,6 +260,8 @@ def build_calibration_result(
     n_passed = sum(1 for r in valid if r.passed)
     n_infra = sum(1 for r in rollouts if r.status == "infra_error")
     n_timeout = sum(1 for r in rollouts if r.status == "timeout")
+    n_rate_limited = sum(1 for r in rollouts if r.status == "rate_limited")
+    n_tool_call = sum(1 for r in rollouts if r.tool_call_failed)
 
     solve_rate = (n_passed / n_valid) if n_valid else None
     ci_low, ci_high = (wilson_interval(n_passed, n_valid, confidence) if n_valid else (None, None))
@@ -253,6 +275,8 @@ def build_calibration_result(
         n_passed=n_passed,
         n_infra_errors=n_infra,
         n_timeouts=n_timeout,
+        n_rate_limited=n_rate_limited,
+        n_tool_call_failures=n_tool_call,
         solve_rate=solve_rate,
         ci_low=ci_low,
         ci_high=ci_high,

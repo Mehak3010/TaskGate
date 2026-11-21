@@ -17,6 +17,7 @@ from taskgate.audit.dynamic_checks import DynamicAuditInfo
 from taskgate.models import (
     DynamicAuditEvidence,
     Report,
+    Rollout,
     Route,
     RunConfig,
     TaskReport,
@@ -29,6 +30,7 @@ from taskgate.report.html_report import (
     write_report_json,
 )
 from taskgate.report.terminal import _audit_cell
+from taskgate.stats.calibration import build_calibration_result
 
 
 def test_report_json_round_trips(demo_report, tmp_path: Path):
@@ -90,6 +92,33 @@ def test_html_written_to_disk_is_single_file(demo_report, tmp_path: Path):
     assert path.read_text(encoding="utf-8").startswith("<!doctype html>")
     # A single file: nothing else was emitted alongside it.
     assert [p.name for p in tmp_path.iterdir()] == ["report.html"]
+
+
+def test_failed_generation_is_stored_but_not_rendered_in_html():
+    """The rejected generation lives in report.json for offline diagnosis only.
+
+    The HTML is what a reviewer reads, so the raw model output stays out of it.
+    """
+    import json
+
+    marker = "MALFORMED-GENERATION-MARKER-7f3a"
+    rollout = Rollout(
+        index=0,
+        status="ok",
+        passed=False,
+        tool_call_failed=True,
+        failed_generation=marker,
+    )
+    cal = build_calibration_result(
+        task_id="t_gen", rollouts=[rollout], n_planned=1, model="m"
+    )
+    task = TaskReport(
+        task_id="t_gen", path="/tmp/t_gen", route=Route.NEEDS_MORE_RUNS, calibration=cal
+    )
+    report = Report(config=RunConfig(model="m"), tasks=[task])
+
+    assert marker in json.dumps(report.model_dump(mode="json"))
+    assert marker not in render_report_html(report)
 
 
 def test_severity_badge_reports_info_separately():

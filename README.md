@@ -48,6 +48,31 @@ Run on the 8-task demo corpus with Docker Desktop, dynamic audit enabled
 
 Every finding carries a stable rule ID, a file and line, and a concrete fix hint.
 
+## Live calibration (first real run)
+
+3 tasks x 5 rollouts with `openai/gpt-oss-120b` on Groq's free tier, concurrency 1, temperature 0.7,
+max 12 turns. 15 rollouts, all valid, 0 infra errors, 114,173 tokens, $0, 1,814 s wall time.
+
+| Task | Valid | Passed | Tool-call failures | Solve rate (90% Wilson) | Route |
+|---|---|---|---|---|---|
+| `t01_log_parser` | 5 | 2 | 3 | 40% [14%-73%] | NEEDS-MORE-RUNS |
+| `t02_csv_dedupe` | 5 | 5 | 0 | 100% [65%-100%] | REWRITE |
+| `t03_trivial_rename` | 5 | 5 | 0 | 100% [65%-100%] | REWRITE |
+
+**What this shows**
+- All 3 non-passes on `t01` were `tool_use_failed`: the model wrote a tool call Groq could not parse.
+  They are counted as task failures, not infra errors. The 2 rollouts that made valid tool calls both
+  passed. So the 40% reflects tool-call reliability in this agent loop as much as task difficulty:
+  the same task reads 40% or 100% depending on how those failures are counted.
+- `t02` and `t03` are routed REWRITE (too easy for this model). They are not DROP because at N=5 the
+  lower bound (65%) cannot reach the 80% DROP threshold.
+- `t01` is NEEDS-MORE-RUNS because its interval straddles the target window.
+
+**Limits.** One run per task, N=5, so intervals are wide. The model is a free-tier model driven by a
+minimal agent loop, so these rates show the pipeline works end to end; they do not measure difficulty
+for frontier models or a client's own scaffold. The demo corpus was not designed to be hard.
+The offline `taskgate demo` numbers above come from a mock agent and are labelled SIMULATED.
+
 ## How it works
 
 ```mermaid
@@ -132,10 +157,33 @@ Any BLOCKER stops the task. No calibration spend happens for it.
   | Verdict | Condition |
   |---------|-----------|
   | `BLOCKED` | any BLOCKER finding |
-  | `NEEDS-MORE-RUNS` | fewer than 5 valid rollouts, or the interval straddles a window boundary |
-  | `DROP` | upper bound below the window, or lower bound at or above 80% |
+  | `NEEDS-MORE-RUNS` | fewer than 5 valid rollouts |
+  | `DROP` | upper bound of the interval below the window (too hard), or lower bound at or above 80% (degenerately easy) |
   | `SHIP` | point estimate inside the window (default 10-30%) |
-  | `REWRITE` | out of window and unresolved, or a recoverable cause diagnosed |
+  | `NEEDS-MORE-RUNS` | the interval straddles a window boundary |
+  | `REWRITE` | interval sits above the window but is not degenerate, or is out of window and unresolved |
+
+  The **5-valid-rollout floor is fixed** and is deliberately *not* tied to
+  `--rollouts`. If a run requests fewer than 5 rollouts, every task comes back as
+  `NEEDS-MORE-RUNS` no matter how decisive its point estimate looks: a small
+  sample cannot buy a verdict. Ask for at least 5 (the default is 20) to get a
+  real route. A recoverable diagnosis (see below) can turn a `DROP` or a
+  *straddling* `NEEDS-MORE-RUNS` into `REWRITE`, but it can never override the
+  too-few-rollouts verdict.
+
+### Rollout outcomes
+
+Valid rollouts (the solve-rate denominator) are the ones that ran to completion.
+Everything else is counted separately rather than hidden inside the failure rate:
+
+* **infra errors** -- the sandbox or provider failed (Docker, timeout, an
+  unrecoverable HTTP error). Excluded from the denominator.
+* **rate-limited** -- the provider's daily quota ran out; the run stops cleanly
+  and resumes tomorrow.
+* **tool-call failures** -- the model's *own* tool call was unparseable
+  (`tool_use_failed`), even after the per-turn retries. These are counted as task
+  failures, but are disclosed separately so they do not silently inflate the
+  failure count.
 
 ## Diagnosis
 
