@@ -22,3 +22,6 @@ audit_out/
 live_tasks/
 live_out*/
 live_smoke*/
+
+live_final/
+live_*/

@@ -48,16 +48,30 @@ Run on the 8-task demo corpus with Docker Desktop, dynamic audit enabled
 
 Every finding carries a stable rule ID, a file and line, and a concrete fix hint.
 
-## Live calibration
+## Live calibration (first real run)
 
-Placeholder - no live-model numbers are published yet. This section will carry the
-results of a completed `taskgate calibrate` run against a free-tier model: per task
-the valid / failed / tool-call-failure / infrastructure counts, tokens per rollout,
-wall time, the Wilson interval and the routed verdict, plus the raw summary block
-from `report.json`.
+3 tasks x 5 rollouts with `openai/gpt-oss-120b` on Groq's free tier, concurrency 1, temperature 0.7,
+max 12 turns. 15 rollouts, all valid, 0 infra errors, 114,173 tokens, $0, 1,814 s wall time.
 
-Until then, do not read the demo figures above as live measurements: they come from
-the mock agent, and every mock report carries a visible `SIMULATED` banner.
+| Task | Valid | Passed | Tool-call failures | Solve rate (90% Wilson) | Route |
+|---|---|---|---|---|---|
+| `t01_log_parser` | 5 | 2 | 3 | 40% [14%-73%] | NEEDS-MORE-RUNS |
+| `t02_csv_dedupe` | 5 | 5 | 0 | 100% [65%-100%] | REWRITE |
+| `t03_trivial_rename` | 5 | 5 | 0 | 100% [65%-100%] | REWRITE |
+
+**What this shows**
+- All 3 non-passes on `t01` were `tool_use_failed`: the model wrote a tool call Groq could not parse.
+  They are counted as task failures, not infra errors. The 2 rollouts that made valid tool calls both
+  passed. So the 40% reflects tool-call reliability in this agent loop as much as task difficulty:
+  the same task reads 40% or 100% depending on how those failures are counted.
+- `t02` and `t03` are routed REWRITE (too easy for this model). They are not DROP because at N=5 the
+  lower bound (65%) cannot reach the 80% DROP threshold.
+- `t01` is NEEDS-MORE-RUNS because its interval straddles the target window.
+
+**Limits.** One run per task, N=5, so intervals are wide. The model is a free-tier model driven by a
+minimal agent loop, so these rates show the pipeline works end to end; they do not measure difficulty
+for frontier models or a client's own scaffold. The demo corpus was not designed to be hard.
+The offline `taskgate demo` numbers above come from a mock agent and are labelled SIMULATED.
 
 ## How it works
 
