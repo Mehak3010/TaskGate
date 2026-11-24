@@ -6,6 +6,4 @@ timeout_s: 900
 verifier_cmd: python -m pytest -q /tests
 demo:
   transcript_profile: normal
-  simulate_dynamic:
-    - D001
-  expected_route: BLOCKED
+  expected_route: REWRITE

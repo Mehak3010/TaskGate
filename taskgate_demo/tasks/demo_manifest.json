@@ -34,13 +34,13 @@
     },
     {
       "task_id": "t06_flaky_timing",
-      "planted_issue": "sleep-based sync, unseeded RNG and wall-clock reads in the verifier (S007 / D001)",
+      "planted_issue": "sleep-based sync, unseeded RNG and wall-clock reads in the verifier (S007)",
       "true_pass_rate": null,
-      "expected_route": "BLOCKED"
+      "expected_route": "REWRITE"
     },
     {
       "task_id": "t07_network_dep",
-      "planted_issue": "the verifier fetches an expected value over the network at run time (S006 / D003)",
+      "planted_issue": "the verifier fetches an expected value over the network at run time (S006 / D001: reference solution passes 0/5 with networking off)",
       "true_pass_rate": null,
       "expected_route": "BLOCKED"
     },
