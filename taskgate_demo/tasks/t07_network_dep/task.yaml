@@ -7,5 +7,5 @@ verifier_cmd: python -m pytest -q /tests
 demo:
   transcript_profile: normal
   simulate_dynamic:
-    - D003
+    - D001
   expected_route: BLOCKED

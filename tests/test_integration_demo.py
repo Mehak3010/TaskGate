@@ -21,18 +21,18 @@ EXPECTED_ROUTES = {
     "t03_trivial_rename": Route.DROP,
     "t04_ambiguous_spec": Route.REWRITE,
     "t05_leaky_tests": Route.BLOCKED,
-    "t06_flaky_timing": Route.BLOCKED,
+    "t06_flaky_timing": Route.REWRITE,
     "t07_network_dep": Route.BLOCKED,
     "t08_borderline": Route.NEEDS_MORE_RUNS,
 }
 
 EXPECTED_COUNTS = {
     "SHIP": 2,
-    "REWRITE": 1,
+    "REWRITE": 2,
     "NEEDS-MORE-RUNS": 1,
     "AUDIT-ONLY": 0,
     "DROP": 1,
-    "BLOCKED": 3,
+    "BLOCKED": 2,
 }
 
 
@@ -82,7 +82,12 @@ def test_blocked_tasks_have_no_calibration_spend(demo_report):
 
 
 def test_blocked_tasks_expose_exact_findings(demo_report):
-    """The three planted leak/network/flakiness tasks point at a real file:line."""
+    """Simulated dynamic findings mirror the recorded real container run.
+
+    t05 (leak) and t07 (network) block on real findings; t06 carries its
+    flakiness as S007 warnings only, and t08 as a D004 warning, so neither is
+    stopped at the audit.
+    """
     _tasks, report = demo_report
     by_id = {t.task_id: t for t in report.tasks}
 
@@ -91,10 +96,18 @@ def test_blocked_tasks_expose_exact_findings(demo_report):
     assert all(f.file for f in leaky.findings)
 
     network = by_id["t07_network_dep"]
-    assert "S006" in {f.rule_id for f in network.findings}
+    network_rules = {f.rule_id for f in network.findings}
+    # The real run found D001 (reference passes 0/5), not D003.
+    assert {"S006", "D001"} <= network_rules
+    assert "D003" not in network_rules
 
     flaky = by_id["t06_flaky_timing"]
-    assert flaky.findings
+    assert not flaky.blockers
+    assert {f.rule_id for f in flaky.findings} == {"S007"}
+
+    borderline = by_id["t08_borderline"]
+    assert {f.rule_id for f in borderline.findings} == {"D004"}
+    assert borderline.findings[0].simulated
 
 
 def test_needs_more_runs_suggests_extra_runs(demo_report):

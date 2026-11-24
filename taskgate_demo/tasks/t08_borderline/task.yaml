@@ -9,5 +9,7 @@ verifier_cmd: python -m pytest -q /tests
 demo:
   true_pass_rate: 0.35
   transcript_profile: turn_limit
+  simulate_dynamic:
+    - D004
   expected_route: NEEDS-MORE-RUNS
   expected_cause: genuinely_hard

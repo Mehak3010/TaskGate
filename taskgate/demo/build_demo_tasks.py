@@ -606,7 +606,7 @@ TASKS: list[DemoTask] = [
     # ---------------------------------------------------------------- t06
     DemoTask(
         task_id="t06_flaky_timing",
-        planted_issue="sleep-based sync, unseeded RNG and wall-clock reads in the verifier (S007 / D001)",
+        planted_issue="sleep-based sync, unseeded RNG and wall-clock reads in the verifier (S007)",
         task_yaml="\n".join(
             [
                 "id: t06_flaky_timing",
@@ -615,7 +615,10 @@ TASKS: list[DemoTask] = [
                 "author: demo-corpus",
                 "timeout_s: 900",
                 "verifier_cmd: python -m pytest -q /tests",
-                _demo_block(None, "normal", "BLOCKED", None, ("D001",)),
+                # The real container run found only S007 warnings here, no D001
+                # flakiness, so nothing blocks it: like the recorded run it is
+                # routed to a human rather than stopped at the audit.
+                _demo_block(None, "normal", "REWRITE"),
                 "",
             ]
         ),
@@ -707,7 +710,7 @@ TASKS: list[DemoTask] = [
     # ---------------------------------------------------------------- t07
     DemoTask(
         task_id="t07_network_dep",
-        planted_issue="the verifier fetches an expected value over the network at run time (S006 / D003)",
+        planted_issue="the verifier fetches an expected value over the network at run time (S006 / D001: reference solution passes 0/5 with networking off)",
         task_yaml="\n".join(
             [
                 "id: t07_network_dep",
@@ -716,7 +719,7 @@ TASKS: list[DemoTask] = [
                 "author: demo-corpus",
                 "timeout_s: 900",
                 "verifier_cmd: python -m pytest -q /tests",
-                _demo_block(None, "normal", "BLOCKED", None, ("D003",)),
+                _demo_block(None, "normal", "BLOCKED", None, ("D001",)),
                 "",
             ]
         ),
@@ -777,7 +780,7 @@ TASKS: list[DemoTask] = [
                 "expected_output_format: json",
                 "solution_cmd: bash /solution/solve.sh",
                 "verifier_cmd: python -m pytest -q /tests",
-                _demo_block(0.35, "turn_limit", "NEEDS-MORE-RUNS", "genuinely_hard"),
+                _demo_block(0.35, "turn_limit", "NEEDS-MORE-RUNS", "genuinely_hard", ("D004",)),
                 "",
             ]
         ),

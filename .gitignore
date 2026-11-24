@@ -25,3 +25,8 @@ live_smoke*/
 
 live_final/
 live_*/
+
+taskgate_demo/results/
+
+fresh_*/
+demo_check/

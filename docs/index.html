@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TaskGate report viewer</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f6f6f3;--surface:#fff;--text:#1b1b19;--muted:#68685f;--line:#e0dfd8;--accent:#2b57d6;
+--ship:#17793f;--rewrite:#a85a00;--drop:#a52a2a;--more:#6444b0;--block:#a52a2a;--audit:#4f5b69;--window:rgba(23,121,63,.17);--warn:#a85a00;--info:#4f5b69}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121211;--surface:#1b1b19;--text:#ecece7;--muted:#a1a198;--line:#33332f;--accent:#8aa7ff;
+--ship:#5ac488;--rewrite:#f0a34a;--drop:#ff8a8a;--more:#b79cff;--block:#ff8a8a;--audit:#9db0c4;--window:rgba(90,196,136,.2);--warn:#f0a34a;--info:#9db0c4}}
+:root[data-theme="dark"]{--bg:#121211;--surface:#1b1b19;--text:#ecece7;--muted:#a1a198;--line:#33332f;--accent:#8aa7ff;
+--ship:#5ac488;--rewrite:#f0a34a;--drop:#ff8a8a;--more:#b79cff;--block:#ff8a8a;--audit:#9db0c4;--window:rgba(90,196,136,.2);--warn:#f0a34a;--info:#9db0c4}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.sub{color:var(--muted);margin:0 0 16px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+button,.btn{font:inherit;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover,.btn:hover{border-color:var(--accent)}
+#drop{border:1.5px dashed var(--line);border-radius:12px;padding:12px 14px;color:var(--muted);flex:1;min-width:220px}
+#drop.over{border-color:var(--accent);color:var(--text)}
+.banner{border:1px solid var(--line);border-left:4px solid var(--warn);background:var(--surface);border-radius:8px;padding:10px 12px;margin:10px 0;font-size:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.card b{display:block;font-size:20px}.card span{color:var(--muted);font-size:12px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chip{display:inline-block;border:1px solid currentColor;border-radius:999px;padding:1px 9px;font-size:12px;font-weight:600;white-space:nowrap}
+.ship{color:var(--ship)}.rewrite{color:var(--rewrite)}.drop,.blocked{color:var(--drop)}.more{color:var(--more)}.audit{color:var(--audit)}
+.scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top;font-size:14px}
+th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}tr:last-child td{border-bottom:0}
+td small{display:block;color:var(--muted);margin-top:2px}
+svg.iv{width:200px;height:26px;display:block}
+.find{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:14px}
+.sev{font-weight:700;font-size:12px;margin-right:6px}.BLOCKER{color:var(--block)}.WARN{color:var(--warn)}.INFO{color:var(--info)}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+.hint{color:var(--muted)}footer{margin-top:32px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>TaskGate report viewer</h1>
+<p class="sub">Drop a <code>report.json</code> from <code>taskgate audit</code> or <code>taskgate calibrate</code>. It is read in your browser and is never uploaded.</p>
+<div class="bar">
+  <div id="drop">Drop report.json here, or</div>
+  <label class="btn">Choose file<input id="file" type="file" accept=".json,application/json" hidden></label>
+  <button id="sample" type="button">Load sample run</button>
+</div>
+<div id="out"></div>
+<footer>TaskGate routes tasks; a person always makes the final call. Intervals are Wilson score intervals, so with few rollouts they are wide on purpose.</footer>
+</main>
+<script>
+const SAMPLE={label:'Sample: first live run, openai/gpt-oss-120b via Groq free tier',
+config:{model:'openai/gpt-oss-120b',provider:'groq',rollouts:5,concurrency:1,ship_min:0.1,ship_max:0.3,drop_if_lower_bound_at_or_above:0.8,ci_confidence:0.9},
+summary:{n_tasks:3,total_rollouts:15,total_valid_rollouts:15,total_infra_errors:0,total_tool_call_failures:3,total_tokens:114173,total_cost_usd:0,wall_time_s:1814.5,run_status:'completed'},
+tasks:[
+{task_id:'t01_log_parser',route:'NEEDS-MORE-RUNS',route_reason:'CI [0.14, 0.73] straddles a window boundary; point estimate 0.40 is not decisive',findings:[],calibration:{n_valid:5,n_passed:2,n_tool_call_failures:3,n_infra_errors:0,solve_rate:0.4,ci_low:0.1427,ci_high:0.7275}},
+{task_id:'t02_csv_dedupe',route:'REWRITE',route_reason:'CI sits above the window (lower bound 0.65 > ship_max 0.30): too easy to be useful',findings:[],calibration:{n_valid:5,n_passed:5,n_tool_call_failures:0,n_infra_errors:0,solve_rate:1,ci_low:0.6489,ci_high:1}},
+{task_id:'t03_trivial_rename',route:'REWRITE',route_reason:'CI sits above the window (lower bound 0.65 > ship_max 0.30): too easy to be useful',findings:[],calibration:{n_valid:5,n_passed:5,n_tool_call_failures:0,n_infra_errors:0,solve_rate:1,ci_low:0.6489,ci_high:1}}],
+notes:['All 3 non-passes on t01_log_parser were tool_use_failed: the model wrote a tool call the API could not parse. They count as task failures, not infra errors.','Free-tier model in a minimal agent loop: this shows the pipeline works end to end, not difficulty for frontier models.']};
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct=x=>x==null||isNaN(x)?'n/a':Math.round(x*100)+'%';
+const num=x=>x==null?'n/a':Number(x).toLocaleString();
+const cls=r=>({'SHIP':'ship','REWRITE':'rewrite','DROP':'drop','BLOCKED':'blocked','NEEDS-MORE-RUNS':'more','AUDIT-ONLY':'audit'}[r]||'audit');
+
+function chart(c,cfg){
+  if(!c||c.solve_rate==null||c.ci_low==null) return '<span class="hint">no rollouts</span>';
+  const W=300,x=v=>Math.max(0,Math.min(1,v))*W,lo=cfg.ship_min??0.1,hi=cfg.ship_max??0.3;
+  return '<svg class="iv" viewBox="0 0 300 26" role="img" aria-label="solve rate '+pct(c.solve_rate)+', interval '+pct(c.ci_low)+' to '+pct(c.ci_high)+'">'+
+  '<rect x="0" y="11" width="300" height="4" rx="2" fill="var(--line)"/>'+
+  '<rect x="'+x(lo)+'" y="3" width="'+(x(hi)-x(lo))+'" height="20" fill="var(--window)"/>'+
+  '<line x1="'+x(c.ci_low)+'" x2="'+x(c.ci_high)+'" y1="13" y2="13" stroke="var(--accent)" stroke-width="3"/>'+
+  '<circle cx="'+x(c.solve_rate)+'" cy="13" r="5" fill="var(--accent)"/></svg>';
+}
+
+function render(r,label){
+  const cfg=r.config||{},tasks=Array.isArray(r.tasks)?r.tasks:[],s=r.summary||{};
+  const counts={};tasks.forEach(t=>counts[t.route]=(counts[t.route]||0)+1);
+  let h='';
+  if(label) h+='<div class="banner">'+esc(label)+'</div>';
+  if(r.simulated) h+='<div class="banner"><b>SIMULATED.</b> These numbers come from a mock agent, not a real model.</div>';
+  const cards=[['Tasks',s.n_tasks??tasks.length],['Valid rollouts',s.total_valid_rollouts],['Tool-call failures',s.total_tool_call_failures],['Infra errors',s.total_infra_errors],['Tokens',s.total_tokens],['Cost (USD)',s.total_cost_usd!=null?'$'+Number(s.total_cost_usd).toFixed(2):null],['Wall time',s.wall_time_s!=null?Math.round(s.wall_time_s/60)+' min':null]];
+  h+='<h2>Run</h2><p class="sub">'+esc([cfg.provider,cfg.model,cfg.rollouts?cfg.rollouts+' rollouts/task':'',cfg.concurrency?'concurrency '+cfg.concurrency:'',s.run_status].filter(Boolean).join(' · '))+'</p>';
+  h+='<div class="cards">'+cards.filter(c=>c[1]!=null).map(c=>'<div class="card"><b>'+esc(num(c[1]))+'</b><span>'+esc(c[0])+'</span></div>').join('')+'</div>';
+  h+='<div class="chips">'+Object.keys(counts).map(k=>'<span class="chip '+cls(k)+'">'+esc(k)+' · '+counts[k]+'</span>').join('')+'</div>';
+  h+='<h2>Tasks</h2><div class="scroll"><table><thead><tr><th>Task</th><th>Passed</th><th>Solve rate ('+Math.round((cfg.ci_confidence||0.9)*100)+'% interval)</th><th>Route</th></tr></thead><tbody>';
+  tasks.forEach(t=>{const c=t.calibration;
+    h+='<tr><td><code>'+esc(t.task_id)+'</code>'+(c&&c.n_tool_call_failures?'<small>'+c.n_tool_call_failures+' tool-call failure(s)</small>':'')+'</td>'+
+    '<td>'+(c&&c.n_valid!=null?c.n_passed+' / '+c.n_valid:'n/a')+'</td>'+
+    '<td>'+(c&&c.solve_rate!=null?'<b>'+pct(c.solve_rate)+'</b> <span class="hint">['+pct(c.ci_low)+'–'+pct(c.ci_high)+']</span>':'')+chart(c,cfg)+'</td>'+
+    '<td><span class="chip '+cls(t.route)+'">'+esc(t.route||'n/a')+'</span><small>'+esc(t.route_reason||'')+'</small></td></tr>';});
+  h+='</tbody></table></div><p class="hint">Green band = target solve-rate window ('+pct(cfg.ship_min??0.1)+'–'+pct(cfg.ship_max??0.3)+').</p>';
+  const withF=tasks.filter(t=>t.findings&&t.findings.length);
+  h+='<h2>Audit findings</h2>';
+  if(!withF.length) h+='<p class="hint">No audit findings in this report.</p>';
+  withF.forEach(t=>{h+='<p><code>'+esc(t.task_id)+'</code></p>'+t.findings.map(f=>'<div class="find"><span class="sev '+esc(f.severity)+'">'+esc(f.severity)+'</span><b>'+esc(f.rule_id)+'</b> <code>'+esc(f.file||'')+(f.line?':'+f.line:'')+'</code><br>'+esc(f.message)+(f.fix_hint?'<br><span class="hint">Fix: '+esc(f.fix_hint)+'</span>':'')+'</div>').join('');});
+  if(Array.isArray(r.notes)&&r.notes.length) h+='<h2>Notes</h2>'+r.notes.map(n=>'<p class="hint">'+esc(n)+'</p>').join('');
+  $('out').innerHTML=h;
+}
+function load(file){
+  const rd=new FileReader();
+  rd.onload=()=>{try{const j=JSON.parse(rd.result);if(!j.tasks)throw new Error('no “tasks” array');render(j,null);}
+    catch(e){$('out').innerHTML='<div class="banner">Couldn’t read that file: '+esc(e.message)+'. Use the report.json from a TaskGate run.</div>';}};
+  rd.readAsText(file);
+}
+$('file').addEventListener('change',e=>e.target.files[0]&&load(e.target.files[0]));
+$('sample').addEventListener('click',()=>render(SAMPLE,SAMPLE.label));
+const d=$('drop');
+['dragenter','dragover'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.add('over')}));
+['dragleave','drop'].forEach(ev=>d.addEventListener(ev,e=>{e.preventDefault();d.classList.remove('over')}));
+d.addEventListener('drop',e=>e.dataTransfer.files[0]&&load(e.dataTransfer.files[0]));
+render(SAMPLE,SAMPLE.label);
+</script>
+</body>
+</html>
