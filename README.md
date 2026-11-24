@@ -12,6 +12,8 @@ The creative work, writing original tasks and judging whether they are fair to
 the agent, stays with people. TaskGate takes over the reruns, the arithmetic and
 the checklist, and hands people a short list of findings to judge.
 
+Built for teams that produce and QA RL / SFT task datasets.
+
 ![Summary of a real run](docs/img/summary.png)
 
 ## Results from a real run
@@ -71,7 +73,14 @@ max 12 turns. 15 rollouts, all valid, 0 infra errors, 114,173 tokens, $0, 1,814 
 **Limits.** One run per task, N=5, so intervals are wide. The model is a free-tier model driven by a
 minimal agent loop, so these rates show the pipeline works end to end; they do not measure difficulty
 for frontier models or a client's own scaffold. The demo corpus was not designed to be hard.
-The offline `taskgate demo` numbers above come from a mock agent and are labelled SIMULATED.
+The offline `taskgate demo` numbers come from a mock agent and are labelled SIMULATED.
+
+## Tested on a public benchmark
+
+I ran the static audit on 66 Terminal-Bench tasks and hand-read 20 findings. None was a confirmed
+defect, so I tightened six rules that were producing false alarms and added regression tests for
+each. Static audit only; no container runs or model rollouts were done on these tasks. Details and
+limits: [docs/real_findings.md](docs/real_findings.md).
 
 ## How it works
 
@@ -100,24 +109,31 @@ flowchart LR
 
 ## Quickstart
 
+Needs [uv](https://docs.astral.sh/uv/). Docker is only needed for the container audit and live
+rollouts.
+
 ```bash
 uv sync
-uv run taskgate audit taskgate_demo/tasks      # real audit; needs Docker running
-uv run taskgate demo                           # offline walkthrough, labelled SIMULATED
+uv run taskgate demo        # offline walkthrough, no Docker or API key, labelled SIMULATED
 ```
 
-On your own tasks:
+On your own tasks (see "Supported task layouts" below):
 
 ```bash
-uv run taskgate audit     tasks/my_task                  # lint only, no spend
-uv run taskgate calibrate tasks/ --model mock            # rollouts + stats + routing
-uv run taskgate run       tasks/ --model openai/gpt-4o-mini --rollouts 30
-uv run taskgate report    taskgate_out                   # rebuild HTML from report.json
+uv run taskgate audit tasks/ --no-dynamic     # static rules only: no Docker, seconds
+uv run taskgate audit tasks/                  # plus container checks (needs Docker)
+uv run taskgate calibrate tasks/ --model mock # mock rollouts + stats + routing
+uv run taskgate calibrate tasks/ --provider groq --model openai/gpt-oss-120b --rollouts 5 --concurrency 1
+uv run taskgate report taskgate_out           # rebuild HTML from report.json
 ```
 
-Common flags: `--model`, `--rollouts N` (default 20), `--concurrency C`,
-`--ship-min`, `--ship-max`, `--budget-usd`, `--timeout-s`, `--out DIR`, `--seed`,
-`--no-dynamic`.
+Providers: `--provider openrouter|groq|openai-compatible` (with `--base-url` for the last).
+Keys come from environment variables only: `OPENROUTER_API_KEY` or `GROQ_API_KEY`. Useful flags:
+`--rollouts`, `--concurrency`, `--max-turns`, `--max-tool-output-chars`, `--tpm`, `--ship-min`,
+`--ship-max`, `--budget-usd`, `--timeout-s`, `--out`, `--seed`, `--skip-preflight`, `--no-dynamic`.
+
+To view any `report.json` without installing anything, open `docs/index.html` in a browser and drop
+the file onto it. It is read locally and never uploaded.
 
 ## Rule reference
 
@@ -178,8 +194,8 @@ Everything else is counted separately rather than hidden inside the failure rate
 
 * **infra errors** -- the sandbox or provider failed (Docker, timeout, an
   unrecoverable HTTP error). Excluded from the denominator.
-* **rate-limited** -- the provider's daily quota ran out; the run stops cleanly
-  and resumes tomorrow.
+* **rate-limited** -- the provider's daily quota ran out; the run stops cleanly and is reported as
+  rate-limited. Rerun after the quota resets.
 * **tool-call failures** -- the model's *own* tool call was unparseable
   (`tool_use_failed`), even after the per-turn retries. These are counted as task
   failures, but are disclosed separately so they do not silently inflate the
@@ -211,12 +227,13 @@ taskgate/
   models.py       Pydantic v2 models; the JSON schema is the source of truth
   loader.py       the only module that knows the task format
   audit/          rules, static checks, container checks
-  runner/         Docker sandbox, agent loop, mock agent, async executor, pricing
+  runner/         Docker sandbox, agent loop, providers, pacing, mock agent, executor, pricing
   stats/          Wilson interval, pass@k, routing (pure functions)
   diagnose/       heuristic and optional LLM diagnosis
   report/         terminal summary, report.json, single-file offline report.html
   demo/           the 8-task demo corpus builder
 tests/            pytest suite for TaskGate itself
+docs/index.html   offline report viewer (drop in a report.json)
 ```
 
 Two adapters are the whole integration surface:
@@ -226,39 +243,57 @@ Two adapters are the whole integration surface:
   `async def run_rollout(index) -> Rollout`, as in `runner/mock_agent.py` and
   `runner/agent.py`.
 
-### Assumed task layout
+### Supported task layouts
 
-Terminal-Bench / Harbor style:
+TaskGate format (used by the demo corpus):
 
 ```
 tasks/<task_id>/
   task.yaml            id, instruction, difficulty, timeouts, author, allow_network
-  Dockerfile           environment
+  Dockerfile           agent image
   instruction.md       what the agent sees
-  tests/               hidden verifier, not agent-visible
+  tests/               hidden verifier (pytest)
   solution/            reference solution
 ```
+
+Terminal-Bench / Harbor format:
+
+```
+tasks/<task_id>/
+  task.toml
+  instruction.md
+  environment/Dockerfile
+  tests/test.sh
+  solution/solve.sh
+```
+
+The static audit has been run on 66 Terminal-Bench tasks. The container audit and live calibration
+on this layout have not been verified end to end. Any other format needs only a change to
+`loader.py`.
 
 ## Status
 
 | Component | State |
 |---|---|
-| Static audit (S001-S010) | Built and tested; verified on the demo corpus |
+| Static audit (S001-S010) | Built and tested; verified on the demo corpus and on 66 Terminal-Bench tasks |
 | Container audit (D000-D005) | Built; verified on Docker Desktop (results above) |
-| Calibration engine, routing, reports | Built and unit-tested; validated end-to-end on the offline demo |
-| Live-model calibration | Next milestone: pluggable agent loop is in place; measurement run pending |
+| Calibration engine, routing, reports | Built and unit-tested; validated end to end |
+| Live-model calibration | First real run completed (see Live calibration above); N=5 per task, one free-tier model |
 
 ## Limitations
 
 * Audit rules are heuristics. Findings go to a person, and TaskGate never
   auto-approves a task.
-* Solve-rate intervals at N near 20 are wide; the tool shows them instead of
+* Solve-rate intervals at small N are wide; the tool shows them instead of
   hiding them.
 * The built-in agent loop is minimal and is not a client's own scaffold, so a
   measured solve rate may differ from theirs. `AgentAdapter` is the extension
   point.
-* `taskgate demo` uses a mock agent. Its numbers are simulated and every such
-  report carries a visible `SIMULATED` banner.
+* The live run used a free-tier model with a minimal agent loop and rate-limited quotas, so N is
+  small and intervals are wide.
+* `taskgate demo` uses a mock agent. Its numbers are simulated, its container findings are simulated
+  from task metadata to mirror the recorded Docker run, and every such report carries a visible
+  `SIMULATED` banner. The real run is the one under "Results from a real run".
 
 ## Roadmap
 
@@ -275,10 +310,9 @@ uv sync
 uv run pytest
 ```
 
-The suite covers every static rule (positive and negative cases), Wilson
-intervals and pass@k against known values, the routing table including boundary
-cases, the budget guard, infrastructure-error handling, mock determinism, and an
-integration test across all 8 demo tasks. Docker tests skip automatically when no
-daemon is reachable.
+The suite has 182 tests (the 3 Docker-dependent ones skip when no daemon is reachable). It covers
+every static rule (positive and negative cases), Wilson intervals and pass@k against known values,
+the routing table including boundary cases, the budget guard, provider and infrastructure error
+handling, mock determinism, and an integration test across all 8 demo tasks.
 
 More detail: [docs/real_findings.md](docs/real_findings.md).
