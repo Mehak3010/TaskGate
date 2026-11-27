@@ -218,7 +218,11 @@ async def test_preflight_succeeds_on_200(monkeypatch):
 
 # ---------------------------------------------------------------- pipeline
 def test_preflight_failure_starts_no_containers(monkeypatch, make_task):
-    task = make_task(task_yaml="id: t_simple\n", instruction="do a thing\n")
+    task = make_task(
+        {"Dockerfile": "FROM python:3.11-slim\n"},
+        task_yaml="id: t_simple\n",
+        instruction="do a thing\n",
+    )
 
     monkeypatch.setattr("taskgate.pipeline.docker_available", lambda *a, **k: True)
     monkeypatch.setenv("GROQ_API_KEY", FAKE_KEY)
