@@ -120,6 +120,16 @@ _RULES: tuple[Rule, ...] = (
         kind="static",
     ),
     Rule(
+        id="LOAD-ERROR",
+        title="Task could not be loaded",
+        severity=Severity.BLOCKER,
+        fix_hint=(
+            "Fix the task.yaml / task.toml named in the message (see 'Task format' in the "
+            "README); the other tasks in the folder were still audited."
+        ),
+        kind="load",
+    ),
+    Rule(
         id="D000",
         title="Task image failed to build",
         severity=Severity.BLOCKER,

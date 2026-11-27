@@ -56,7 +56,11 @@ NONDET_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"\bdatetime\.now\s*\(|\bdatetime\.utcnow\s*\(", "datetime.now()/utcnow()"),
     (r"\bdate\.today\s*\(", "date.today()"),
     (r"\bos\.urandom\s*\(|\buuid\.uuid4\s*\(", "os.urandom()/uuid4()"),
-    (r"\brandom\.(random|randint|choice|choices|shuffle|sample)\s*\(", "random without a seed"),
+    (r"\brandom\.(?!seed\b|Random\b|SystemRandom\b)[a-z_][a-z_0-9]*\s*\(", "random without a seed"),
+    (
+        r"\b(?:np|numpy)\.random\.(?!seed\b|default_rng\b|RandomState\b|Generator\b)[a-z_][a-z_0-9]*\s*\(",
+        "random (numpy) without a seed",
+    ),
     (r"\blist\s*\(\s*set\s*\(", "list(set(...)) has no defined order"),
     (r"\bnext\s*\(\s*iter\s*\(\s*set\s*\(", "next(iter(set(...))) has no defined order"),
 )
@@ -624,17 +628,40 @@ def check_s003(task: Task) -> list[Finding]:
     return findings
 
 
+def _is_size_measure(node: ast.AST) -> bool:
+    """``len(x)``, ``x.stat().st_size``, ``os.path.getsize(x)``: a bare size, not content."""
+    if isinstance(node, ast.Attribute) and node.attr in ("st_size", "size"):
+        return True
+    if isinstance(node, ast.Call):
+        name = _call_name(node.func)
+        return name in ("len", "count", "size", "getsize") or name.endswith(".getsize")
+    return False
+
+
 def _is_weak_assert(node: ast.Assert) -> bool:
     test = node.test
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
         return True
     if isinstance(test, ast.Call):
-        return _call_name(test.func) in WEAK_ASSERT_CALLS or _call_name(test.func).endswith(".exists")
+        name = _call_name(test.func)
+        return (
+            name in WEAK_ASSERT_CALLS
+            or name.endswith((".exists", ".is_file", ".is_dir", ".read_text", ".read_bytes", ".getsize"))
+        )
     if isinstance(test, (ast.Name, ast.Attribute, ast.Subscript)):
         return True
     if isinstance(test, ast.Constant):
         return True
     if isinstance(test, ast.Compare):
+        if len(test.ops) == 1 and isinstance(test.comparators[0], ast.Constant):
+            op, val = test.ops[0], test.comparators[0].value
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and _is_size_measure(test.left):
+                if (
+                    (isinstance(op, ast.Gt) and val == 0)
+                    or (isinstance(op, ast.GtE) and val == 1)
+                    or (isinstance(op, ast.NotEq) and val == 0)
+                ):
+                    return True
         for op, comp in zip(test.ops, test.comparators):
             if isinstance(op, ast.IsNot):
                 return True
@@ -913,16 +940,41 @@ def check_s006(task: Task) -> list[Finding]:
 # --------------------------------------------------------------------------
 # S007 -- non-determinism in tests
 # --------------------------------------------------------------------------
+def _random_imports(text: str) -> list[str]:
+    """Names bound by ``from random import ...`` (minus seeding), so bare calls are caught."""
+    names: list[str] = []
+    for m in re.finditer(r"^\s*from\s+random\s+import\s+([^\n#]+)", text, re.M):
+        for part in m.group(1).replace("(", " ").replace(")", " ").split(","):
+            bits = part.split()
+            if not bits:
+                continue
+            name = bits[-1] if len(bits) >= 3 and bits[-2] == "as" else bits[0]
+            if bits[0] not in ("seed", "Random", "SystemRandom", "*") and name.isidentifier():
+                names.append(re.escape(name))
+    return names
+
+
 def check_s007(task: Task) -> list[Finding]:
     findings: list[Finding] = []
     for src in test_sources(task):
         seen_lines: set[int] = set()
         random_lines: list[int] = []
-        has_seed = bool(re.search(r"\brandom\.seed\s*\(", src.text))
+        has_seed = bool(
+            re.search(
+                r"\brandom\.seed\s*\(|\brandom\.Random\s*\(\s*[^)\s]"
+                r"|\b(?:np|numpy)\.random\.seed\s*\(|\bdefault_rng\s*\(\s*[^)\s]"
+                r"|\bRandomState\s*\(\s*[^)\s]",
+                src.text,
+            )
+        )
+        patterns = list(NONDET_PATTERNS)
+        imported = _random_imports(src.text)
+        if imported:
+            patterns.append((r"(?<![.\w])(?:" + "|".join(imported) + r")\s*\(", "random without a seed"))
         for i, raw in enumerate(src.text.splitlines(), start=1):
             if raw.strip().startswith("#"):
                 continue
-            for pattern, label in NONDET_PATTERNS:
+            for pattern, label in patterns:
                 if re.search(pattern, raw):
                     if i in seen_lines:
                         continue
@@ -1000,8 +1052,44 @@ def check_s008(task: Task) -> list[Finding]:
 # S009 -- instruction ambiguity (advisory)
 # --------------------------------------------------------------------------
 OUTPUT_PATH_RE = re.compile(
-    r"(?:[\w.@-]*/)?[\w.-]+\.(?:json|jsonl|csv|txt|yaml|yml|tsv|log|md|xml|out|bin)\b", re.I
+    r"(?:[\w.@-]*/)?[\w.-]+\.(?:json|jsonl|csv|txt|yaml|yml|tsv|log|md|xml|out|bin|sh|conf|cfg|ini"
+    r"|toml|py|sql|html|parquet|pkl)\b",
+    re.I,
 )
+OUTPUT_CUE_RE = re.compile(
+    r"\b(?:write|writes|written|save|saves|saved|store|stores|output|outputs|create|creates|produce"
+    r"|produces|generate|generates|emit|emits|dump|dumps|export|exports|print|prints|place|put"
+    r"|rename|renames|move|moves|copy|copies|convert|converts|rewrite|rewrites|replace|replaces)\b",
+    re.I,
+)
+INPUT_CUE_RE = re.compile(
+    r"\b(?:read|reads|load|loads|parse|parses|open|opens|input|inputs|given|provided|contains?|source|from)\b",
+    re.I,
+)
+OUTPUT_DIR_RE = re.compile(r"(?:^|/)(?:out|output|outputs|results?)/", re.I)
+OUTPUT_NAME_RE = re.compile(r"(?:^|/)(?:out|output|outputs|result|results)[\w.-]*\.\w+$", re.I)
+
+
+def _is_output_path(text: str, match: re.Match[str]) -> bool:
+    """A path the agent must PRODUCE, as opposed to an input file it reads.
+
+    The nearest verb in the path's sentence decides (write/save/rename/convert... versus
+    read/load/parse...). File names are removed first, so the word ``input`` inside
+    ``input.txt`` is not mistaken for a verb. With no verb at all, a path under an
+    out/output/results directory, or a file named output.*/result.*, counts as an output.
+    """
+    path = match.group(0)
+    sentence = re.split(r"(?<=[.!?])\s+|\n", text[: match.start()])[-1]
+    sentence = OUTPUT_PATH_RE.sub(" ", sentence)
+    last_out = max((m.start() for m in OUTPUT_CUE_RE.finditer(sentence)), default=-1)
+    last_in = max((m.start() for m in INPUT_CUE_RE.finditer(sentence)), default=-1)
+    if last_in > last_out:
+        return False
+    if last_out >= 0:
+        return True
+    return bool(OUTPUT_DIR_RE.search(path) or OUTPUT_NAME_RE.search(path))
+
+
 FORMAT_WORD_RE = re.compile(
     r"\b(json|jsonl|csv|yaml|yml|tsv|xml|plain text|text format|format|schema|stdout|JSON object)\b",
     re.I,
@@ -1016,8 +1104,11 @@ def check_s009(task: Task) -> list[Finding]:
             make_finding("S009", "instruction.md", None, "instruction is empty; there is no spec to solve.")
         ]
     findings: list[Finding] = []
-    path_match = OUTPUT_PATH_RE.search(instruction)
-    format_match = FORMAT_WORD_RE.search(instruction)
+    outputs = [m for m in OUTPUT_PATH_RE.finditer(instruction) if _is_output_path(instruction, m)]
+    path_match = outputs[0] if outputs else None
+    # A format word inside a file name (``raw_sales.csv``) is not a format statement, but
+    # the extension of the OUTPUT path is one.
+    format_match = FORMAT_WORD_RE.search(OUTPUT_PATH_RE.sub(" ", instruction)) or path_match
     if not path_match:
         findings.append(
             make_finding(
@@ -1050,6 +1141,32 @@ def check_s009(task: Task) -> list[Finding]:
 
 
 # --------------------------------------------------------------------------
+# D000 (no Dockerfile) and LOAD-ERROR
+# --------------------------------------------------------------------------
+def check_load_error(task: Task) -> list[Finding]:
+    if not task.load_error:
+        return []
+    return [make_finding("LOAD-ERROR", "task.yaml", None, task.load_error)]
+
+
+def check_missing_dockerfile(task: Task) -> list[Finding]:
+    """No Dockerfile means no image can ever be built: that is D000, not a silent skip."""
+    if task.load_error or task.dockerfile_path is not None:
+        return []
+    if getattr(task.spec, "docker_image", None):  # Terminal-Bench may use a prebuilt image
+        return []
+    return [
+        make_finding(
+            "D000",
+            "Dockerfile",
+            None,
+            "no Dockerfile found (looked for Dockerfile at the task root and in environment/): "
+            "no task image can be built.",
+        )
+    ]
+
+
+# --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
 ALL_CHECKS = (
@@ -1063,10 +1180,13 @@ ALL_CHECKS = (
     check_s008,
     check_s009,
     check_s010,
+    check_missing_dockerfile,
 )
 
 
 def run_static_audit(task: Task, checks=ALL_CHECKS) -> list[Finding]:
+    if task.load_error:  # nothing else can be checked on a task that did not load
+        return check_load_error(task)
     findings: list[Finding] = []
     for check in checks:
         try:
