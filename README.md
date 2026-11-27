@@ -122,15 +122,17 @@ On your own tasks (see "Supported task layouts" below):
 ```bash
 uv run taskgate audit tasks/ --no-dynamic     # static rules only: no Docker, seconds
 uv run taskgate audit tasks/                  # plus container checks (needs Docker)
-uv run taskgate calibrate tasks/ --model mock # mock rollouts + stats + routing
+uv run taskgate calibrate tasks/ --mock       # fully offline: no Docker, no API key, labelled SIMULATED
 uv run taskgate calibrate tasks/ --provider groq --model openai/gpt-oss-120b --rollouts 5 --concurrency 1
 uv run taskgate report taskgate_out           # rebuild HTML from report.json
+uv run taskgate audit tasks/ --no-dynamic --fail-on-blocker   # CI gate: exit 1 if any task is BLOCKED
 ```
 
 Providers: `--provider openrouter|groq|openai-compatible` (with `--base-url` for the last).
 Keys come from environment variables only: `OPENROUTER_API_KEY` or `GROQ_API_KEY`. Useful flags:
 `--rollouts`, `--concurrency`, `--max-turns`, `--max-tool-output-chars`, `--tpm`, `--ship-min`,
-`--ship-max`, `--budget-usd`, `--timeout-s`, `--out`, `--seed`, `--skip-preflight`, `--no-dynamic`.
+`--ship-max`, `--budget-usd`, `--timeout-s`, `--out`, `--seed`, `--skip-preflight`,
+`--dynamic/--no-dynamic` (container audit; off by default with `--mock`), `--fail-on-blocker`.
 
 To view any `report.json` without installing anything, open `docs/index.html` in a browser and drop
 the file onto it. It is read locally and never uploaded.
@@ -159,6 +161,14 @@ Rule IDs are stable, so two runs produce diffable reports.
 | D005 | Image build is not reproducible | BLOCKER |
 
 Any BLOCKER stops the task. No calibration spend happens for it.
+
+Two further findings are not part of S001-S010 / D000-D005 proper:
+
+* `D000` is also reported statically when a task has no Dockerfile at all (neither at the task root
+  nor in `environment/`), because no image can ever be built.
+* `LOAD-ERROR` (BLOCKER) is reported for a task whose `task.yaml` / `task.toml` cannot be loaded
+  (bad YAML, an invalid value, a duplicate `id`). The message names the field and gives a valid
+  example. Every other task in the folder is still audited.
 
 ## Statistics
 
@@ -212,11 +222,12 @@ validation are discarded. Without a key, zero-cost heuristics are used.
 ## Safe by construction
 
 * Agent containers run as non-root, with CPU, memory and pid limits, networking
-  off unless the task allows it, and the host Docker socket never mounted.
+  off, and the host Docker socket never mounted.
 * Hidden tests are mounted only after the agent stops.
 * Containers and images are torn down on success, on error and on Ctrl-C.
 * Secrets come from environment variables only and never reach a log or report.
-* One task failing never aborts the run; each task carries its own status.
+* One task failing never aborts the run; each task carries its own status. A task that cannot
+  even be loaded is reported as `LOAD-ERROR` and the rest of the folder is still audited.
 
 ## Architecture
 
@@ -243,6 +254,34 @@ Two adapters are the whole integration surface:
   `async def run_rollout(index) -> Rollout`, as in `runner/mock_agent.py` and
   `runner/agent.py`.
 
+### Task format
+
+`id` defaults to the folder name, and every `task.yaml` field is optional. A task needs a Dockerfile
+and tests.
+
+```
+tasks/my_task/
+  task.yaml        optional settings (table below)
+  instruction.md   what the agent sees (INSTRUCTION.md / instructions.md also work); overrides `instruction:`
+  Dockerfile       the agent's image; the build context is the task folder
+  tests/           hidden verifier; mounted at /tests only after the agent stops
+  solution/        reference solution; mounted at /solution, run as `bash /solution/solve.sh`
+```
+
+| `task.yaml` field | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | string | folder name | Must be unique within a run (a duplicate is reported as `LOAD-ERROR`). |
+| `instruction` | string | none | Used only if there is no `instruction.md`. |
+| `difficulty`, `author` | string | none | Free labels; recorded in the report. |
+| `expected_output_format` | `json` \| `yaml` \| `csv` \| `text` | none | Lets rule S008 check that the tests assert the declared format strictly. |
+| `solution_cmd` | string | `bash /solution/solve.sh` if `solution/solve.sh` exists | Command that runs the reference solution. |
+| `verifier_cmd` | string | `python -m pytest -q /tests` | Command that runs the hidden tests. |
+| `allow_network` | bool | `false` | Parsed and recorded, but not yet used: rollouts always run with the network off. |
+| `timeout_s` | int | none | Parsed but not yet used; set the limit with `--timeout-s`. |
+
+Other keys are accepted and ignored. Inside the container, commands run in `/app`, as a non-root
+user, with 2 CPUs, 2 GB of memory and 256 processes.
+
 ### Supported task layouts
 
 TaskGate format (used by the demo corpus):
@@ -267,9 +306,12 @@ tasks/<task_id>/
   solution/solve.sh
 ```
 
-The static audit has been run on 66 Terminal-Bench tasks. The container audit and live calibration
-on this layout have not been verified end to end. Any other format needs only a change to
-`loader.py`.
+The static audit has been run on 66 Terminal-Bench tasks. For the container audit the image is built
+from `environment/` and `tests/test.sh` is run as the verifier. A Terminal-Bench-style task written
+for the evaluation passes the full container audit (build ok, reference solution 5/5, sabotage probe
+2/2); real Terminal-Bench tasks have not been run through it yet, and a separate verifier image
+(`tests/Dockerfile`) is not supported. Any other format needs only
+a change to `loader.py`.
 
 ## Status
 
@@ -291,6 +333,13 @@ on this layout have not been verified end to end. Any other format needs only a 
   point.
 * The live run used a free-tier model with a minimal agent loop and rate-limited quotas, so N is
   small and intervals are wide.
+* The mutation probe in the container audit only deletes the solution's output, so tests that accept
+  an empty or placeholder file are still not caught by it (the static rule S004 catches the common
+  existence-only patterns).
+* An independent evaluation with six newly written tasks, each with a planted defect, found the gaps
+  fixed in this version; what it found and what remains open is in
+  [docs/client_evaluation.md](docs/client_evaluation.md). Treat a clean audit as "no known issues
+  found", not as proof that a task is fair.
 * `taskgate demo` uses a mock agent. Its numbers are simulated, its container findings are simulated
   from task metadata to mirror the recorded Docker run, and every such report carries a visible
   `SIMULATED` banner. The real run is the one under "Results from a real run".
@@ -310,7 +359,7 @@ uv sync
 uv run pytest
 ```
 
-The suite has 182 tests (the 3 Docker-dependent ones skip when no daemon is reachable). It covers
+The suite has 207 tests (the Docker-dependent ones skip when no daemon is reachable). It covers
 every static rule (positive and negative cases), Wilson intervals and pass@k against known values,
 the routing table including boundary cases, the budget guard, provider and infrastructure error
 handling, mock determinism, and an integration test across all 8 demo tasks.
