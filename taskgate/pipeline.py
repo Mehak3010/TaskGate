@@ -149,8 +149,8 @@ def _task_simulated(ctx: PipelineContext, options: PipelineOptions) -> bool:
 # stages
 # --------------------------------------------------------------------------
 def _audit_task(task: Task, ctx: PipelineContext, options: PipelineOptions) -> list[Finding]:
-    findings = run_static_audit(task) if options.audit else []
-    if not options.dynamic:
+    findings = run_static_audit(task) if (options.audit or task.load_error) else []
+    if not options.dynamic or task.load_error:
         return findings
     if ctx.docker_ok:
         dyn, info = run_dynamic_audit(task, reruns=5)
@@ -312,7 +312,11 @@ async def run_pipeline(
     if config.git_hash is None:
         config.git_hash = detect_git_hash()
 
-    if not options.use_docker:
+    if not options.use_docker and not options.dynamic:
+        ctx.notes.append(
+            "Offline run: container checks were not run, so this report has no dynamic findings."
+        )
+    elif not options.use_docker:
         ctx.notes.append(
             "Demo mode: container checks were not run. Dynamic findings in this report "
             "are SIMULATED from demo metadata. Use `taskgate demo --docker` for real ones."

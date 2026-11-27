@@ -119,6 +119,43 @@ class Task(BaseModel):
     spec: TaskSpec
     instruction_md: str = ""
     rel_files: list[str] = Field(default_factory=list)
+    #: Set when the task directory could not be loaded; the task is then reported
+    #: as BLOCKED (LOAD-ERROR) instead of aborting the whole folder.
+    load_error: str | None = None
+
+    @property
+    def build_context_path(self) -> Path:
+        """Docker build context: ``environment/`` for Terminal-Bench, else the task root."""
+        rel = getattr(self.spec, "build_context", None)
+        if isinstance(rel, str) and rel and (self.path / rel).is_dir():
+            return self.path / rel
+        return self.path
+
+    @property
+    def verifier_command(self) -> str:
+        """Command that runs the hidden tests.
+
+        An explicit ``verifier_cmd`` wins. A Terminal-Bench task is verified by its
+        ``tests/test.sh`` entry point (mounted at /tests). Everything else defaults to pytest.
+        """
+        if self.spec.verifier_cmd:
+            return self.spec.verifier_cmd
+        entry = getattr(self.spec, "verifier_entry", None)
+        if isinstance(entry, str) and entry:
+            rel = entry[len("tests/"):] if entry.startswith("tests/") else entry
+            return f"bash /tests/{rel}"
+        return "python -m pytest -q /tests"
+
+    def docker_build_args(self) -> tuple[Path, str] | None:
+        """``(context_dir, dockerfile_relative_to_context)`` for ``images.build``, or None."""
+        dockerfile = self.dockerfile_path
+        if dockerfile is None:
+            return None
+        context = self.build_context_path
+        try:
+            return context, dockerfile.resolve().relative_to(context.resolve()).as_posix()
+        except ValueError:  # Dockerfile outside the declared context: build from the task root
+            return self.path, dockerfile.resolve().relative_to(self.path.resolve()).as_posix()
 
     def file(self, rel: str) -> Path:
         return self.path / rel

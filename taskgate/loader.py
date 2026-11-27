@@ -77,18 +77,76 @@ class TaskLoader:
         """Load ``root`` itself if it is a task, otherwise its immediate children."""
         root = Path(root)
         if self.is_task_dir(root):
-            return [self.load(root)]
+            return [self._load_or_fail(root)]
         if not root.exists():
             raise TaskLoadError(f"path does not exist: {root}")
         if not root.is_dir():
             raise TaskLoadError(f"not a directory: {root}")
-        tasks = [self.load(p) for p in sorted(root.iterdir()) if self.is_task_dir(p)]
+        tasks: list[Task] = []
+        seen: dict[str, Path] = {}
+        for p in sorted(root.iterdir()):
+            if not self.is_task_dir(p):
+                continue
+            task = self._load_or_fail(p)
+            if not task.load_error:
+                first = seen.get(task.task_id)
+                if first is not None:
+                    task = self._failed_task(
+                        p,
+                        f"duplicate task id {task.task_id!r}: also used by {first.name}/. Task ids "
+                        "must be unique within a run (change `id:` in task.yaml).",
+                        task_id=f"{task.task_id}@{p.name}",
+                    )
+                else:
+                    seen[task.task_id] = p
+            tasks.append(task)
         if not tasks:
             raise TaskLoadError(
                 f"no task directories found under {root} "
                 f"(expected <dir>/{self.spec_filenames[0]})"
             )
         return tasks
+
+    # -- failures are per task ---------------------------------------------
+    def _load_or_fail(self, task_dir: Path) -> Task:
+        """Load a task; a task that cannot be loaded becomes a BLOCKED LOAD-ERROR task."""
+        try:
+            return self.load(task_dir)
+        except TaskLoadError as exc:
+            return self._failed_task(task_dir, str(exc))
+
+    def _failed_task(self, task_dir: Path, message: str, task_id: str | None = None) -> Task:
+        tid = task_id or task_dir.name
+        return Task(
+            task_id=tid,
+            path=Path(task_dir).resolve(),
+            spec=TaskSpec(id=tid),
+            instruction_md="",
+            rel_files=self._list_files(Path(task_dir)),
+            load_error=message,
+        )
+
+    FIELD_EXAMPLES = {
+        "id": "id: my_task",
+        "instruction": "instruction: Fix the bug in /app/main.py",
+        "difficulty": "difficulty: medium",
+        "author": "author: your-name",
+        "timeout_s": "timeout_s: 900",
+        "allow_network": "allow_network: false",
+        "expected_output_format": "expected_output_format: text",
+        "solution_cmd": "solution_cmd: bash /solution/solve.sh",
+        "verifier_cmd": "verifier_cmd: python -m pytest -q /tests",
+    }
+
+    @classmethod
+    def _format_validation_error(cls, filename: str, exc: ValidationError) -> str:
+        parts: list[str] = []
+        for err in exc.errors():
+            loc = ".".join(str(x) for x in err.get("loc", ()))
+            example = cls.FIELD_EXAMPLES.get(str(err["loc"][0])) if err.get("loc") else None
+            msg = f"{filename}: field '{loc}' is invalid: {err.get('msg', 'invalid value')}"
+            parts.append(msg + (f" (valid example: {example})" if example else ""))
+        return "; ".join(parts) or f"{filename} is invalid: {exc}"
 
     # -- single task -------------------------------------------------------
     def load(self, task_dir: Path) -> Task:
@@ -104,13 +162,13 @@ class TaskLoader:
         try:
             spec = TaskSpec.model_validate(raw)
         except ValidationError as exc:
-            raise TaskLoadError(f"{spec_path.name} is invalid: {exc}") from exc
+            raise TaskLoadError(self._format_validation_error(spec_path.name, exc)) from exc
 
         instruction_md = spec.instruction
         for name in self.instruction_filenames:
             candidate = task_dir / name
             if candidate.is_file():
-                instruction_md = candidate.read_text(encoding="utf-8", errors="replace")
+                instruction_md = candidate.read_text(encoding="utf-8-sig", errors="replace")
                 break
 
         return Task(
@@ -124,7 +182,7 @@ class TaskLoader:
     # -- spec parsing ------------------------------------------------------
     def _read_spec(self, spec_path: Path, task_dir: Path) -> dict:
         """Parse a ``task.yaml``/``task.yml``/``task.toml`` into a spec mapping."""
-        text = spec_path.read_text(encoding="utf-8")
+        text = spec_path.read_text(encoding="utf-8-sig")  # tolerate a BOM (Windows editors add one)
         if spec_path.suffix.lower() == ".toml":
             try:
                 raw = tomllib.loads(text)
