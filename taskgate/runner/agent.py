@@ -434,7 +434,7 @@ class AgentRunner:
             # reference solution is never mounted into an agent rollout.
             if self.task.tests_dir is not None:
                 self.box.copy_in(self.task.tests_dir, "/tests")
-            verifier = self.task.spec.verifier_cmd or "python -m pytest -q /tests"
+            verifier = self.task.verifier_command
             verdict = self.box.exec(verifier, timeout_s=max(120.0, self.timeout_s / 4))
             return Rollout(
                 index=index,

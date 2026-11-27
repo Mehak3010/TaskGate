@@ -56,7 +56,7 @@ class DynamicAuditInfo:
 # helpers
 # --------------------------------------------------------------------------
 def _verifier_cmd(task: Task) -> str:
-    return task.spec.verifier_cmd or DEFAULT_VERIFIER
+    return task.verifier_command
 
 
 def _solution_cmd(task: Task) -> str | None:

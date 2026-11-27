@@ -46,6 +46,20 @@ BudgetOpt = Annotated[Optional[float], typer.Option("--budget-usd", help="Hard s
 TimeoutOpt = Annotated[int, typer.Option("--timeout-s", help="Per-rollout wall-clock timeout, seconds.")]
 SeedOpt = Annotated[int, typer.Option("--seed", help="Seed for mock mode and sampling.")]
 OutOpt = Annotated[Path, typer.Option("--out", "-o", help="Directory for report.json and report.html.")]
+FailOnBlockerOpt = Annotated[
+    bool,
+    typer.Option("--fail-on-blocker", help="Exit 1 if any task is BLOCKED or failed to load (for CI)."),
+]
+
+
+def _exit_if_blocked(report, fail_on_blocker: bool) -> None:
+    """CI gate: a BLOCKED (or unloadable) task makes the command fail."""
+    if not fail_on_blocker:
+        return
+    blocked = sum(1 for t in report.tasks if getattr(t.route, "value", t.route) == "BLOCKED")
+    if blocked:
+        print_note(f"{blocked} task(s) BLOCKED: exiting 1 (--fail-on-blocker).", console, style="bold red")
+        raise typer.Exit(code=1)
 
 
 def _config(
@@ -139,7 +153,14 @@ def _run(
     console.print(f"[bold]{label}[/]: {len(tasks)} task(s), model {config.model}")
     explicit_mock = bool(config.mock or config.model in ("mock", ""))
     if options.calibrate and explicit_mock:
-        print_note("mock mode: no API key needed, no containers, everything labelled SIMULATED.", console)
+        if options.use_docker and options.dynamic:
+            print_note(
+                "mock rollouts: no model is called and results are SIMULATED, but the container audit "
+                "runs for real and can take minutes (pass --no-dynamic to skip it).",
+                console,
+            )
+        else:
+            print_note("mock mode: no API key needed, no containers, everything labelled SIMULATED.", console)
     if options.use_docker and not explicit_mock and not _wait_for_docker():
         # A real calibration needs a container runtime. Degrading to the mock
         # agent here would publish simulations as if they were measurements, so
@@ -177,6 +198,7 @@ def audit(
     path: PathArg,
     out: OutOpt = Path("taskgate_out"),
     dynamic: Annotated[bool, typer.Option("--dynamic/--no-dynamic", help="Run container checks when Docker is available.")] = True,
+    fail_on_blocker: FailOnBlockerOpt = False,
 ) -> None:
     """Static and dynamic lint. No model calls, no calibration spend."""
     tasks = _load(path)
@@ -189,6 +211,7 @@ def audit(
     print_report_summary(report, console)
     json_path = _emit(report, out)
     print_note(f"wrote {json_path} and {out / 'report.html'}", console, style="green")
+    _exit_if_blocked(report, fail_on_blocker)
 
 
 @app.command()
@@ -211,6 +234,14 @@ def calibrate(
     seed: SeedOpt = 1234,
     out: OutOpt = Path("taskgate_out"),
     audit_first: Annotated[bool, typer.Option("--audit/--no-audit", help="Run the static audit first (recommended).")] = True,
+    dynamic: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--dynamic/--no-dynamic",
+            help="Run the container audit. Default: on for real models, off with --mock (fully offline).",
+        ),
+    ] = None,
+    fail_on_blocker: FailOnBlockerOpt = False,
 ) -> None:
     """Run N rollouts per task, compute the solve rate and route each task."""
     tasks = _load(path)
@@ -219,11 +250,21 @@ def calibrate(
         seed, out, provider=provider, base_url=base_url, skip_preflight=skip_preflight,
         max_turns=max_turns, max_tool_output_chars=max_tool_output_chars, tpm=tpm,
     )
-    options = PipelineOptions(audit=audit_first, dynamic=audit_first, calibrate=True, diagnose=True)
+    explicit_mock = bool(mock or model in ("mock", ""))
+    if dynamic is None:
+        dynamic = audit_first and not explicit_mock
+    options = PipelineOptions(
+        audit=audit_first,
+        dynamic=dynamic,
+        calibrate=True,
+        diagnose=True,
+        use_docker=(not explicit_mock) or dynamic,
+    )
     report = _run(tasks, config, options, label="calibrate")
     print_report_summary(report, console)
     _emit(report, out)
     print_note(f"wrote {out / 'report.json'} and {out / 'report.html'}", console, style="green")
+    _exit_if_blocked(report, fail_on_blocker)
 
 
 @app.command()
@@ -245,6 +286,7 @@ def run(
     timeout_s: TimeoutOpt = 900,
     seed: SeedOpt = 1234,
     out: OutOpt = Path("taskgate_out"),
+    fail_on_blocker: FailOnBlockerOpt = False,
 ) -> None:
     """Full pipeline: audit -> calibrate -> report."""
     tasks = _load(path)
@@ -258,6 +300,7 @@ def run(
     print_report_summary(report, console)
     _emit(report, out)
     print_note(f"wrote {out / 'report.json'} and {out / 'report.html'}", console, style="green")
+    _exit_if_blocked(report, fail_on_blocker)
 
 
 @app.command()

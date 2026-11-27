@@ -280,9 +280,10 @@ class Sandbox:
     # -- build -------------------------------------------------------------
     def build(self, labels: dict[str, str] | None = None) -> RunResult:
         started = time.perf_counter()
-        dockerfile = self.task.dockerfile_path
-        if dockerfile is None:
+        build_args = self.task.docker_build_args()
+        if build_args is None:
             raise DockerUnavailable(f"{self.task.task_id}: no Dockerfile")
+        build_context, dockerfile_rel = build_args
         if not self.rebuild:
             try:
                 self.client.images.get(self.tag)
@@ -298,8 +299,8 @@ class Sandbox:
         log = ""
         try:
             _image, logs = self.client.images.build(
-                path=str(self.task.path),
-                dockerfile=dockerfile.name,
+                path=str(build_context),
+                dockerfile=dockerfile_rel,
                 tag=self.tag,
                 rm=True,
                 labels={"taskgate.task": self.task.task_id, **(labels or {})},
