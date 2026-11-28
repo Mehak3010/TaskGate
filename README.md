@@ -14,7 +14,11 @@ the checklist, and hands people a short list of findings to judge.
 
 Built for teams that produce and QA RL / SFT task datasets.
 
-![Summary of a real run](docs/img/summary.png)
+![Offline demo summary (simulated calibration)](docs/img/summary.png)
+
+*Output of the offline `taskgate demo` run. Calibration numbers and two container findings are
+**SIMULATED** (see "Offline demo run" below). Real Docker and live-model results are in the next two
+sections.*
 
 ## Results from a real run
 
@@ -34,14 +38,12 @@ Run on the 8-task demo corpus with Docker Desktop, dynamic audit enabled
 | Model calls needed | None: the audit runs without model spend, and blocked tasks never reach calibration |
 | Wall time, whole corpus | 463.7 s, including image builds and 5 reference runs per task |
 
-![Per-task routing from the same run](docs/img/routes.png)
-
 ### What it found
 
 | Task | Planted issue | What TaskGate reported |
 |---|---|---|
 | `t01_log_parser`, `t02_csv_dedupe` | none (healthy controls) | clean |
-| `t03_trivial_rename` | far too easy for a model | clean on the audit; this is a difficulty problem that the solve-rate calibration step measures |
+| `t03_trivial_rename` | far too easy for a model | clean on the audit; this is a difficulty problem that the solve-rate calibration step measures (the simulated demo routes it to DROP at 95%) |
 | `t04_ambiguous_spec` | instruction never names the output file | 3 `S009` notes: no output path, no format, unresolved "It" |
 | `t05_leaky_tests` | hidden tests copied into the agent's image | **BLOCKER** `S001` at `Dockerfile:5`, with the fix |
 | `t06_flaky_timing` | sleep-based sync, unseeded RNG, wall-clock reads | 3 `S007` warnings with file and line, routed to a human |
@@ -73,7 +75,41 @@ max 12 turns. 15 rollouts, all valid, 0 infra errors, 114,173 tokens, $0, 1,814 
 **Limits.** One run per task, N=5, so intervals are wide. The model is a free-tier model driven by a
 minimal agent loop, so these rates show the pipeline works end to end; they do not measure difficulty
 for frontier models or a client's own scaffold. The demo corpus was not designed to be hard.
-The offline `taskgate demo` numbers come from a mock agent and are labelled SIMULATED.
+
+## Offline demo run (SIMULATED)
+
+`taskgate demo` runs the same 8 tasks through a mock agent at N=20 rollouts. It needs no Docker and no
+API key, and it exercises every route the pipeline can produce. Solve rates, pass@1 and cost are
+simulated. The container findings `D001` and `D004` are generated from task metadata to mirror the
+recorded Docker run, and every such report carries a visible `SIMULATED` banner.
+
+![Per-task routing from the offline demo (simulated)](docs/img/routes.png)
+
+*Same 8-task corpus through the mock agent (N=20). Solve rates, pass@1 and cost are simulated.*
+
+| Route | Count | Tasks |
+|---|---|---|
+| SHIP | 2 | `t01_log_parser`, `t02_csv_dedupe` |
+| REWRITE | 2 | `t04_ambiguous_spec`, `t06_flaky_timing` |
+| NEEDS-MORE-RUNS | 1 | `t08_borderline` |
+| DROP | 1 | `t03_trivial_rename` |
+| BLOCKED | 2 | `t05_leaky_tests`, `t07_network_dep` |
+
+3 blocker findings (1 simulated), 5 warnings (1 simulated), 2 tasks in the target window.
+
+| Task | Simulated solve rate | 90% CI | Route | Why |
+|---|---|---|---|---|
+| `t01_log_parser` | 15% (3/20) | 6-32% | SHIP | point estimate inside the 10-30% window |
+| `t02_csv_dedupe` | 15% (3/20) | 6-32% | SHIP | same |
+| `t03_trivial_rename` | 95% (19/20) | 80-99% | DROP | lower bound at the 80% degenerately-easy threshold |
+| `t04_ambiguous_spec` | 0% (0/20) | 0-12% | REWRITE | upper bound below the window, but the `S009` diagnosis points to an underspecified instruction, so rewrite rather than drop |
+| `t05_leaky_tests` | none | none | BLOCKED | `S001`; no calibration spend |
+| `t06_flaky_timing` | 70% (14/20) | 52-84% | REWRITE | interval above the window, not degenerate; 3 `S007` warnings |
+| `t07_network_dep` | none | none | BLOCKED | `S006`, `D001` (simulated), `S005`; no calibration spend |
+| `t08_borderline` | 35% (7/20) | 20-53% | NEEDS-MORE-RUNS | interval straddles the window edge; about 190 more runs to resolve |
+
+Simulated total cost is about $0.20. These numbers show how routing behaves and are **not** evidence
+about task difficulty. Compare the live-model table above, where `t01` reads 40% rather than 15%.
 
 ## Tested on a public benchmark
 
@@ -84,19 +120,7 @@ limits: [docs/real_findings.md](docs/real_findings.md).
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A["Task folder"] --> B["Static audit (S001-S010)"]
-    B --> C["Container audit (D000-D005)"]
-    C -->|"any blocker"| X["BLOCKED, no spend"]
-    C -->|"clean"| D["N rollouts in sandbox"]
-    D --> E["Solve rate with 90 percent interval"]
-    E --> F{"Route"}
-    F --> S["SHIP"]
-    F --> R["REWRITE"]
-    F --> P["DROP"]
-    F --> M["NEEDS-MORE-RUNS"]
-```
+![TaskGate backend, end to end: task folder, static audit, container audit, calibration, stats and routing](docs/img/taskgate-backend.png)
 
 1. **Static audit** reads the task with AST and filesystem rules.
 2. **Container audit** builds the image twice, runs the reference solution in 5
@@ -114,7 +138,7 @@ rollouts.
 
 ```bash
 uv sync
-uv run taskgate demo        # offline walkthrough, no Docker or API key, labelled SIMULATED
+uv run taskgate demo        # offline walkthrough, no Docker or API key, labelled SIMULATED (produces the demo screenshots above)
 ```
 
 On your own tasks (see "Supported task layouts" below):
@@ -321,6 +345,7 @@ a change to `loader.py`.
 | Container audit (D000-D005) | Built; verified on Docker Desktop (results above) |
 | Calibration engine, routing, reports | Built and unit-tested; validated end to end |
 | Live-model calibration | First real run completed (see Live calibration above); N=5 per task, one free-tier model |
+| Offline demo (mock agent) | Built; every route reproducible with no Docker or API key; labelled SIMULATED |
 
 ## Limitations
 
@@ -342,7 +367,9 @@ a change to `loader.py`.
   found", not as proof that a task is fair.
 * `taskgate demo` uses a mock agent. Its numbers are simulated, its container findings are simulated
   from task metadata to mirror the recorded Docker run, and every such report carries a visible
-  `SIMULATED` banner. The real run is the one under "Results from a real run".
+  `SIMULATED` banner. The real runs are the ones under "Results from a real run" and "Live
+  calibration". Simulated solve rates (for example `t01` at 15%) should not be compared with live
+  ones as if they measured the same thing.
 
 ## Roadmap
 
