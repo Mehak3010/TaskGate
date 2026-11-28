@@ -12,7 +12,6 @@ document reports both the numbers and that result honestly.
 |---|---|
 | Dataset | Terminal-Bench, https://github.com/harbor-framework/terminal-bench |
 | License | Apache-2.0 (LICENSE read in the repo) |
-| Commit | `cba65cd26f66fc022a8b3459d16c897ad722d1f2` (2026-11-14) |
 | Tasks audited | 66 (every directory under `tasks/` with `task.toml`) |
 | Mode | Static audit only (`--no-dynamic`). No containers, no model calls, $0. |
 | Dynamic audit | Not applied. All tasks use a separate verifier image (own `tests/Dockerfile`, RewardKit, artifacts copied between containers). Supporting that is roadmap, not built. |
@@ -29,7 +28,7 @@ First run (original rules) versus the run after precision fixes:
 | S001 | crashed on 59 tasks, 1 finding | 0 | crash fixed; the 1 finding was a false positive |
 | S002 | 1 (1) BLOCKER | 0 | false positive |
 | S003 | 37 (15) WARN | 34 (13) INFO | specified output literals, now advisory |
-| S004 | 11 (11) WARN | 2 (2) WARN | harness asserts excluded; the 2 left are false positives too |
+| S004 | 11 (11) WARN | 2 (2) WARN | harness asserts excluded; the 2 left were not hand-reviewed |
 | S005 | 54 (52) | 54 (52) INFO | apt unpinned is near-universal; not a defect signal |
 | S006 | 35,733 (66) BLOCKER | 136 (23) WARN | lock files, docs, localhost excluded |
 | S007 | 180 (42) WARN | 180 (42) WARN | not reviewed in depth |
@@ -95,4 +94,4 @@ every finding (for example most S007 and S009 hits, and most S003 hits beyond th
 - 20 reviewed findings is a sample, not a precision estimate.
 - No dynamic audit and no calibration were run on this set.
 - Not yet verified on my side: the Docker path for the Terminal-Bench format, Ctrl-C cleanup
-  on a real interrupted run (this was verified on the user's machine for the demo task only).
+  on a real interrupted run (this was verified on my machine for the demo task only).
