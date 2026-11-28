@@ -359,7 +359,7 @@ uv sync
 uv run pytest
 ```
 
-The suite has 207 tests (the Docker-dependent ones skip when no daemon is reachable). It covers
+The suite has 211 tests (the Docker-dependent ones skip when no daemon is reachable). It covers
 every static rule (positive and negative cases), Wilson intervals and pass@k against known values,
 the routing table including boundary cases, the budget guard, provider and infrastructure error
 handling, mock determinism, and an integration test across all 8 demo tasks.
