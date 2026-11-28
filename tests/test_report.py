@@ -360,3 +360,26 @@ def test_report_renders_skipped_mutations_with_reason(tmp_path: Path):
     assert "mutations skipped" in html
     assert "change_constant: no constant found in solution" in html
 
+
+
+# ---------------------------------------------------------------- report polish
+def test_html_has_no_engineer_time_headline_but_keeps_the_estimate_in_methodology(demo_report):
+    html = render_report_html(demo_report[1])
+    assert "<b>Engineer time saved" not in html  # no headline tile
+    assert "modelled estimate" in html and "not a measurement" in html
+
+
+def test_html_states_the_wilson_note_once(demo_report):
+    html = render_report_html(demo_report[1])
+    assert html.count("Wilson score interval") == 1
+
+
+def test_html_extra_runs_label_is_explicit(demo_report):
+    html = render_report_html(demo_report[1])
+    assert "more runs to resolve" in html
+    assert "runs?)" not in html
+
+
+def test_summary_tiles_call_out_simulated_findings(demo_report):
+    html = render_report_html(demo_report[1])
+    assert "simulated)" in html  # e.g. "blocker findings (1 simulated)"

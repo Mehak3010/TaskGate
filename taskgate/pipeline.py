@@ -418,8 +418,9 @@ async def run_pipeline(
             "came from the mock agent and must not be read as a measurement."
         )
     ctx.notes.append(
-        "Wilson score interval at 90% confidence; at N=20 a measured 20% has an "
-        "interval of roughly 8-42%, so a point estimate alone is not a decision."
+        "Wilson score interval at 90% confidence (it stays inside [0, 1] and behaves "
+        "sensibly at 0/n and n/n); at N=20 a measured 20% has an interval of roughly "
+        "8-42%, so a point estimate alone is not a decision."
     )
     ctx.notes.append(
         "Audit rules are heuristics: findings are routed to a human, and TaskGate "

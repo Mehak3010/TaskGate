@@ -118,16 +118,13 @@
       <div><b>Dynamic audit</b>{% if report.dynamic_audit_ran %}ran{% else %}not run{% endif %}</div>
       <div><b>Git</b><span class="mono">{{ report.config.git_hash or "n/a" }}</span></div>
       <div><b>TaskGate</b><span class="mono">{{ report.config.taskgate_version }} · py{{ report.config.python_version }}</span></div>
-      <div><b>Engineer time saved (estimate - not measured)</b>{{ report.summary.engineer_minutes_saved }} min
-        <span class="sub">≈ {{ "%.1f"|format(report.summary.engineer_minutes_saved / 60) }} h</span></div>
-    </div>
-    <div class="sub" style="margin-top:6px">
-      Estimate assumption: {{ report.config.manual_minutes_per_task }} min manual QA per task and
-      {{ report.config.manual_minutes_per_finding }} min per finding, both configurable. This is a
-      modelled saving, not a measured one.
     </div>
   </header>
 
+  {% set sim = namespace(blocker=0, warn=0) %}
+  {% for t in report.tasks %}{% for f in t.findings %}{% if f.simulated %}
+    {% if f.severity == "BLOCKER" %}{% set sim.blocker = sim.blocker + 1 %}{% elif f.severity == "WARN" %}{% set sim.warn = sim.warn + 1 %}{% endif %}
+  {% endif %}{% endfor %}{% endfor %}
   <h2>Summary</h2>
   <div class="tiles">
     <div class="tile ship"><div class="n">{{ counts.get("SHIP", 0) }}</div><div class="k">SHIP</div></div>
@@ -137,8 +134,8 @@
     <div class="tile drop"><div class="n">{{ counts.get("DROP", 0) }}</div><div class="k">DROP</div></div>
     <div class="tile blocked"><div class="n">{{ counts.get("BLOCKED", 0) }}</div><div class="k">BLOCKED</div></div>
     <div class="tile"><div class="n">{{ report.summary.n_in_window }}</div><div class="k">in target window</div></div>
-    <div class="tile"><div class="n">{{ report.summary.findings_by_severity.get("BLOCKER", 0) }}</div><div class="k">blocker findings</div></div>
-    <div class="tile"><div class="n">{{ report.summary.findings_by_severity.get("WARN", 0) }}</div><div class="k">warnings</div></div>
+    <div class="tile"><div class="n">{{ report.summary.findings_by_severity.get("BLOCKER", 0) }}</div><div class="k">blocker findings{% if sim.blocker %} <span class="sub">({{ sim.blocker }} simulated)</span>{% endif %}</div></div>
+    <div class="tile"><div class="n">{{ report.summary.findings_by_severity.get("WARN", 0) }}</div><div class="k">warnings{% if sim.warn %} <span class="sub">({{ sim.warn }} simulated)</span>{% endif %}</div></div>
   </div>
 
   <h2>Solve rate with 90% confidence intervals</h2>
@@ -169,7 +166,7 @@
         <td class="mono" data-sort="{{ row.task_id }}">{{ row.task_id }}</td>
         <td data-sort="{{ row.route }}"><span class="pill {{ row.route }}">{{ row.route }}</span></td>
         <td data-sort="{{ row.blockers }}">{% if row.blockers %}✗{{ row.blockers }}{% endif %} {% if row.audit %}{{ row.audit }}{% endif %}</td>
-        <td data-sort="{{ row.rate }}">{{ row.rate }}{% if row.extra_runs %} <span class="sub">(+{{ row.extra_runs }} runs?)</span>{% endif %}</td>
+        <td data-sort="{{ row.rate }}">{{ row.rate }}{% if row.extra_runs %} <span class="sub">(~{{ row.extra_runs }} more runs to resolve)</span>{% endif %}</td>
         <td class="mono" data-sort="{{ row.ci }}">{{ row.ci }}</td>
         <td data-sort="{{ row.pass_at_1 }}">{{ row.pass_at_1 }}</td>
         <td class="mono" data-sort="{{ row.cost }}">{{ row.cost }}</td>
@@ -260,7 +257,7 @@
   <footer>
     <ul>
       {% for note in report.notes %}<li>{{ note }}</li>{% endfor %}
-      <li>Wilson score interval at {{ "%.0f"|format(report.config.ci_confidence * 100) }}% confidence, chosen because it stays inside [0, 1] and behaves sensibly for 0/n and n/n.</li>
+      <li>Engineer time saved is a modelled estimate ({{ report.summary.engineer_minutes_saved }} min, assuming {{ report.config.manual_minutes_per_task }} min of manual QA per task and {{ report.config.manual_minutes_per_finding }} min per finding), not a measurement. It is recorded in report.json and is not a headline figure.</li>
       <li>Routing: DROP if the upper bound &lt; {{ "%.0f"|format(report.config.ship_min * 100) }}% or the lower bound ≥ {{ "%.0f"|format(report.config.drop_if_lower_bound_at_or_above * 100) }}%; SHIP if the point estimate is inside
         [{{ "%.0f"|format(report.config.ship_min * 100) }}%, {{ "%.0f"|format(report.config.ship_max * 100) }}%]; NEEDS-MORE-RUNS when the interval straddles a boundary; any BLOCKER finding → BLOCKED with no calibration spend.</li>
       <li>The minimal agent loop is not the client's real agent scaffold, so a measured solve rate may differ from the client's own. A pluggable AgentAdapter is the extension point.</li>
